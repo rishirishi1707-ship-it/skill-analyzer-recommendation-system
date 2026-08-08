@@ -1,19 +1,60 @@
-from flask import Blueprint, request, jsonify
+# =========================================================
+# routes/student_routes.py
+# =========================================================
+
+from flask import (
+    Blueprint,
+    request,
+    jsonify,
+    current_app
+)
+
 from config import db
+
+from services.skill_extractor import (
+    extract_skills_from_documents
+)
 
 from werkzeug.security import (
     generate_password_hash,
     check_password_hash
 )
 
+from werkzeug.utils import secure_filename
+
 from bson import ObjectId
 from bson.errors import InvalidId
 
 import jwt
 import os
+import uuid
 
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+
+
+# =========================================================
+# OPTIONAL DOCUMENT EXTRACTION LIBRARIES
+# =========================================================
+
+try:
+    from pypdf import PdfReader
+
+    PDF_AVAILABLE = True
+
+except ImportError:
+
+    PDF_AVAILABLE = False
+
+
+try:
+    from docx import Document
+
+    DOCX_AVAILABLE = True
+
+except ImportError:
+
+    DOCX_AVAILABLE = False
 
 
 # =========================================================
@@ -37,13 +78,356 @@ students_collection = db["students"]
 # JWT SECRET KEY
 # =========================================================
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+JWT_SECRET_KEY = os.getenv(
+    "JWT_SECRET_KEY"
+)
 
 if not JWT_SECRET_KEY:
 
     raise RuntimeError(
         "JWT_SECRET_KEY is not configured"
     )
+
+
+# =========================================================
+# ALLOWED FILE EXTENSIONS
+# =========================================================
+
+ALLOWED_RESUME_EXTENSIONS = {
+    "pdf",
+    "docx"
+}
+
+ALLOWED_CERTIFICATE_EXTENSIONS = {
+    "pdf",
+    "docx"
+}
+
+
+# =========================================================
+# MAXIMUM FILE SIZE
+# =========================================================
+
+MAX_FILE_SIZE = 10 * 1024 * 1024
+# 10 MB per file
+
+
+# =========================================================
+# HELPER - FILE EXTENSION
+# =========================================================
+
+def get_file_extension(filename):
+
+    if not filename:
+
+        return ""
+
+    filename = filename.lower()
+
+    if "." not in filename:
+
+        return ""
+
+    return filename.rsplit(
+        ".",
+        1
+    )[1]
+
+
+# =========================================================
+# HELPER - CHECK ALLOWED EXTENSION
+# =========================================================
+
+def allowed_file(
+    filename,
+    allowed_extensions
+):
+
+    extension = get_file_extension(
+        filename
+    )
+
+    return (
+        extension in
+        allowed_extensions
+    )
+
+
+# =========================================================
+# HELPER - EXTRACT PDF TEXT
+# =========================================================
+
+def extract_pdf_text(file_path):
+
+    if not PDF_AVAILABLE:
+
+        return ""
+
+    try:
+
+        reader = PdfReader(
+            file_path
+        )
+
+        extracted_text = []
+
+        for page in reader.pages:
+
+            text = page.extract_text()
+
+            if text:
+
+                extracted_text.append(
+                    text
+                )
+
+        return "\n".join(
+            extracted_text
+        ).strip()
+
+    except Exception as error:
+
+        print(
+            "PDF extraction error:",
+            error
+        )
+
+        return ""
+
+
+# =========================================================
+# HELPER - EXTRACT DOCX TEXT
+# =========================================================
+
+def extract_docx_text(file_path):
+
+    if not DOCX_AVAILABLE:
+
+        return ""
+
+    try:
+
+        document = Document(
+            file_path
+        )
+
+        extracted_text = []
+
+        # -------------------------------------------------
+        # Paragraphs
+        # -------------------------------------------------
+
+        for paragraph in document.paragraphs:
+
+            text = paragraph.text.strip()
+
+            if text:
+
+                extracted_text.append(
+                    text
+                )
+
+        # -------------------------------------------------
+        # Tables
+        # -------------------------------------------------
+
+        for table in document.tables:
+
+            for row in table.rows:
+
+                row_text = []
+
+                for cell in row.cells:
+
+                    text = cell.text.strip()
+
+                    if text:
+
+                        row_text.append(
+                            text
+                        )
+
+                if row_text:
+
+                    extracted_text.append(
+                        " | ".join(
+                            row_text
+                        )
+                    )
+
+        return "\n".join(
+            extracted_text
+        ).strip()
+
+    except Exception as error:
+
+        print(
+            "DOCX extraction error:",
+            error
+        )
+
+        return ""
+
+
+# =========================================================
+# HELPER - EXTRACT DOCUMENT TEXT
+# =========================================================
+
+def extract_document_text(
+    file_path,
+    filename
+):
+
+    extension = get_file_extension(
+        filename
+    )
+
+    if extension == "pdf":
+
+        return extract_pdf_text(
+            file_path
+        )
+
+    if extension == "docx":
+
+        return extract_docx_text(
+            file_path
+        )
+
+    return ""
+
+
+# =========================================================
+# HELPER - SAVE UPLOADED FILE
+# =========================================================
+
+def save_uploaded_file(
+    uploaded_file,
+    folder,
+    allowed_extensions
+):
+
+    if not uploaded_file:
+
+        return None
+
+    original_filename = (
+        uploaded_file.filename
+    )
+
+    if not original_filename:
+
+        return None
+
+    if not allowed_file(
+        original_filename,
+        allowed_extensions
+    ):
+
+        raise ValueError(
+            "Unsupported file type. "
+            "Only PDF and DOCX files are supported."
+        )
+
+    # -----------------------------------------------------
+    # Secure original filename
+    # -----------------------------------------------------
+
+    safe_filename = secure_filename(
+        original_filename
+    )
+
+    if not safe_filename:
+
+        raise ValueError(
+            "Invalid filename"
+        )
+
+    # -----------------------------------------------------
+    # Create unique filename
+    # -----------------------------------------------------
+
+    unique_filename = (
+        uuid.uuid4().hex
+        + "_"
+        + safe_filename
+    )
+
+    file_path = os.path.join(
+        folder,
+        unique_filename
+    )
+
+    # -----------------------------------------------------
+    # Save file
+    # -----------------------------------------------------
+
+    uploaded_file.save(
+        file_path
+    )
+
+    # -----------------------------------------------------
+    # Check actual file size
+    # -----------------------------------------------------
+
+    file_size = os.path.getsize(
+        file_path
+    )
+
+    if file_size > MAX_FILE_SIZE:
+
+        try:
+
+            os.remove(
+                file_path
+            )
+
+        except Exception:
+
+            pass
+
+        raise ValueError(
+            "File size exceeds 10 MB"
+        )
+
+    # -----------------------------------------------------
+    # Extract text
+    # -----------------------------------------------------
+
+    extracted_text = (
+        extract_document_text(
+            file_path,
+            original_filename
+        )
+    )
+
+    return {
+
+        "original_filename":
+            original_filename,
+
+        "stored_filename":
+            unique_filename,
+
+        "file_path":
+            file_path,
+
+        "file_size":
+            file_size,
+
+        "file_type":
+            get_file_extension(
+                original_filename
+            ),
+
+        "extracted_text":
+            extracted_text,
+
+        "uploaded_at":
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+    }
 
 
 # =========================================================
@@ -59,27 +443,30 @@ def token_required(function):
             "Authorization"
         )
 
-        # Check Authorization header
         if not auth_header:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
                     "Authorization token is required"
+
             }), 401
 
-        # Check Bearer format
         if not auth_header.startswith(
             "Bearer "
         ):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
                     "Invalid authorization format"
+
             }), 401
 
-        # Extract token
         token = auth_header.split(
             " ",
             1
@@ -100,25 +487,34 @@ def token_required(function):
             if not student_id:
 
                 return jsonify({
+
                     "success": False,
+
                     "message":
                         "Invalid token"
+
                 }), 401
 
         except jwt.ExpiredSignatureError:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
                     "Token has expired"
+
             }), 401
 
         except jwt.InvalidTokenError:
 
             return jsonify({
+
                 "success": False,
+
                 "message":
                     "Invalid token"
+
             }), 401
 
         return function(
@@ -140,27 +536,100 @@ def token_required(function):
 )
 def register_student():
 
-    data = request.get_json(
-        silent=True
-    )
+    # =====================================================
+    # GET STUDENT DATA
+    # =====================================================
+
+    data = None
+
+    # -----------------------------------------------------
+    # JSON request
+    # -----------------------------------------------------
+
+    if request.is_json:
+
+        data = request.get_json(
+            silent=True
+        )
+
+    # -----------------------------------------------------
+    # Multipart request
+    # -----------------------------------------------------
+
+    else:
+
+        student_data = request.form.get(
+            "student_data"
+        )
+
+        if student_data:
+
+            try:
+
+                import json
+
+                data = json.loads(
+                    student_data
+                )
+
+            except Exception:
+
+                return jsonify({
+
+                    "success": False,
+
+                    "message":
+                        "Invalid student_data JSON"
+
+                }), 400
 
     if not data:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid JSON data"
+
         }), 400
 
 
-    # -----------------------------------------------------
-    # Required fields
-    # -----------------------------------------------------
+    # =====================================================
+    # DEBUG
+    # =====================================================
+
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "DATA RECEIVED FROM FRONTEND"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(data)
+
+    print(
+        "========================================\n"
+    )
+
+
+    # =====================================================
+    # REQUIRED FIELDS
+    # =====================================================
 
     required_fields = [
+
         "full_name",
+
         "register_number",
+
         "email",
+
         "password"
     ]
 
@@ -169,141 +638,543 @@ def register_student():
         if not data.get(field):
 
             return jsonify({
+
                 "success": False,
+
                 "message":
                     f"{field} is required"
+
             }), 400
 
 
-    # -----------------------------------------------------
-    # Check existing student
-    # -----------------------------------------------------
+    # =====================================================
+    # EXTRACT NESTED DATA
+    # =====================================================
 
-    existing_student = students_collection.find_one({
+    academic_data = data.get(
+        "academic",
+        {}
+    )
 
-        "$or": [
+    if not isinstance(
+        academic_data,
+        dict
+    ):
 
-            {
-                "personal.email":
-                    data["email"]
-            },
+        academic_data = {}
 
-            {
-                "personal.register_number":
-                    data["register_number"]
-            }
 
-        ]
+    career_data = data.get(
+        "career_preferences",
+        {}
+    )
 
-    })
+    if not isinstance(
+        career_data,
+        dict
+    ):
+
+        career_data = {}
+
+
+    resume_data = data.get(
+        "resume",
+        {}
+    )
+
+    if not isinstance(
+        resume_data,
+        dict
+    ):
+
+        resume_data = {}
+
+
+    skills_data = data.get(
+        "skills",
+        []
+    )
+
+    if not isinstance(
+        skills_data,
+        list
+    ):
+
+        skills_data = []
+
+
+    certifications_data = data.get(
+        "certifications",
+        []
+    )
+
+    if not isinstance(
+        certifications_data,
+        list
+    ):
+
+        certifications_data = []
+
+
+    projects_data = data.get(
+        "projects",
+        []
+    )
+
+    if not isinstance(
+        projects_data,
+        list
+    ):
+
+        projects_data = []
+
+
+    # =====================================================
+    # CHECK EXISTING STUDENT
+    # =====================================================
+
+    existing_student = (
+        students_collection.find_one({
+
+            "$or": [
+
+                {
+                    "personal.email":
+                        data["email"]
+                },
+
+                {
+                    "personal.register_number":
+                        data["register_number"]
+                }
+
+            ]
+
+        })
+    )
 
 
     if existing_student:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Student already registered"
+
         }), 409
 
 
+    # =====================================================
+    # UPLOAD DIRECTORIES
+    # =====================================================
+
+    resume_folder = current_app.config.get(
+        "RESUME_FOLDER"
+    )
+
+    certificate_folder = current_app.config.get(
+        "CERTIFICATE_FOLDER"
+    )
+
+
+    # =====================================================
+    # UPLOAD RESUME
+    # =====================================================
+
+    uploaded_resume = None
+
+    resume_file = request.files.get(
+        "resume"
+    )
+
+    if resume_file:
+
+        if not resume_folder:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Resume upload folder is not configured"
+
+            }), 500
+
+        try:
+
+            uploaded_resume = (
+                save_uploaded_file(
+
+                    resume_file,
+
+                    resume_folder,
+
+                    ALLOWED_RESUME_EXTENSIONS
+
+                )
+            )
+
+        except ValueError as error:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    str(error)
+
+            }), 400
+
+
+    # =====================================================
+    # UPLOAD CERTIFICATES
+    # =====================================================
+
+    uploaded_certificates = []
+
+    certificate_files = (
+        request.files.getlist(
+            "certificates"
+        )
+    )
+
+    if certificate_files:
+
+        if not certificate_folder:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Certificate upload folder is not configured"
+
+            }), 500
+
+        for certificate_file in certificate_files:
+
+            if not certificate_file.filename:
+
+                continue
+
+            try:
+
+                certificate_info = (
+                    save_uploaded_file(
+
+                        certificate_file,
+
+                        certificate_folder,
+
+                        ALLOWED_CERTIFICATE_EXTENSIONS
+
+                    )
+                )
+
+                if certificate_info:
+
+                    uploaded_certificates.append(
+                        certificate_info
+                    )
+
+            except ValueError as error:
+
+                return jsonify({
+
+                    "success": False,
+
+                    "message":
+                        str(error)
+
+                }), 400
+
+
+    # =====================================================
+    # AUTOMATIC SKILL EXTRACTION
+    # =====================================================
+
+    resume_extracted_text = ""
+
+    if uploaded_resume:
+
+        resume_extracted_text = (
+            uploaded_resume.get(
+                "extracted_text",
+                ""
+            )
+            or ""
+        )
+
+
+    certificate_extracted_texts = []
+
+    for certificate in uploaded_certificates:
+
+        extracted_text = (
+            certificate.get(
+                "extracted_text",
+                ""
+            )
+            or ""
+        )
+
+        if extracted_text:
+
+            certificate_extracted_texts.append(
+                extracted_text
+            )
+
+
     # -----------------------------------------------------
-    # Create student document
+    # Extract skills from documents
     # -----------------------------------------------------
+
+    try:
+
+        detected_skills = (
+            extract_skills_from_documents(
+
+                resume_text=
+                    resume_extracted_text,
+
+                certificate_texts=
+                    certificate_extracted_texts
+
+            )
+        )
+
+    except Exception as error:
+
+        print(
+            "Skill extraction error:",
+            error
+        )
+
+        detected_skills = []
+
+
+    # =====================================================
+    # DEBUG SKILL EXTRACTION
+    # =====================================================
+
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "AUTOMATICALLY DETECTED SKILLS"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        detected_skills
+    )
+
+    print(
+        "========================================\n"
+    )
+
+
+    # =====================================================
+    # MERGE CERTIFICATE INFORMATION
+    # =====================================================
+
+    final_certifications = []
+
+    for index, certification in enumerate(
+        certifications_data
+    ):
+
+        if not isinstance(
+            certification,
+            dict
+        ):
+
+            continue
+
+        certification_copy = dict(
+            certification
+        )
+
+        if index < len(
+            uploaded_certificates
+        ):
+
+            certification_copy[
+                "file"
+            ] = uploaded_certificates[
+                index
+            ]
+
+        final_certifications.append(
+            certification_copy
+        )
+
+
+    # =====================================================
+    # RESUME DATA
+    # =====================================================
+
+    final_resume = {
+
+        "has_resume":
+            resume_data.get(
+                "has_resume"
+            ),
+
+        "resume_name":
+            resume_data.get(
+                "resume_name"
+            ),
+
+        "file":
+            uploaded_resume
+    }
+
+
+    # =====================================================
+    # CREATE STUDENT DOCUMENT
+    # =====================================================
 
     student = {
 
         # =================================================
-        # PERSONAL INFORMATION
+        # PERSONAL
         # =================================================
 
         "personal": {
 
             "full_name":
-                data.get("full_name"),
+                data.get(
+                    "full_name"
+                ),
 
             "register_number":
-                data.get("register_number"),
+                data.get(
+                    "register_number"
+                ),
 
             "roll_number":
-                data.get("roll_number"),
+                data.get(
+                    "roll_number"
+                ),
 
             "email":
-                data.get("email"),
+                data.get(
+                    "email"
+                ),
 
             "mobile":
-                data.get("mobile"),
+                data.get(
+                    "mobile"
+                ),
 
             "gender":
-                data.get("gender"),
+                data.get(
+                    "gender"
+                ),
 
             "date_of_birth":
-                data.get("date_of_birth"),
+                data.get(
+                    "date_of_birth"
+                ),
 
             "department":
-                data.get("department"),
+                data.get(
+                    "department"
+                ),
 
             "degree":
-                data.get("degree"),
+                data.get(
+                    "degree"
+                ),
 
             "year_of_study":
-                data.get("year_of_study"),
+                data.get(
+                    "year_of_study"
+                ),
 
             "section":
-                data.get("section"),
+                data.get(
+                    "section"
+                ),
 
             "semester":
-                data.get("semester")
+                data.get(
+                    "semester"
+                )
         },
 
 
         # =================================================
-        # ACADEMIC INFORMATION
+        # ACADEMIC
         # =================================================
 
         "academic": {
 
             "college_name":
-                data.get("college_name"),
+                academic_data.get(
+                    "college_name"
+                ),
 
             "university":
-                data.get("university"),
+                academic_data.get(
+                    "university"
+                ),
 
             "branch":
-                data.get("branch"),
+                academic_data.get(
+                    "branch"
+                ),
 
             "current_cgpa":
-                data.get("current_cgpa"),
+                academic_data.get(
+                    "current_cgpa"
+                ),
 
             "tenth_percentage":
-                data.get("tenth_percentage"),
+                academic_data.get(
+                    "tenth_percentage"
+                ),
 
             "twelfth_percentage":
-                data.get("twelfth_percentage"),
+                academic_data.get(
+                    "twelfth_percentage"
+                ),
 
             "number_of_arrears":
-                data.get("number_of_arrears"),
+                academic_data.get(
+                    "number_of_arrears"
+                ),
 
             "backlog_history":
-                data.get("backlog_history"),
+                academic_data.get(
+                    "backlog_history"
+                ),
 
             "academic_year":
-                data.get("academic_year"),
+                academic_data.get(
+                    "academic_year"
+                ),
 
             "graduation_year":
-                data.get("graduation_year")
+                academic_data.get(
+                    "graduation_year"
+                )
         },
 
 
         # =================================================
-        # SKILLS
+        # MANUALLY SELECTED SKILLS
         # =================================================
 
         "skills":
-            data.get(
-                "skills",
-                []
-            ),
+            skills_data,
 
 
         # =================================================
@@ -311,21 +1182,23 @@ def register_student():
         # =================================================
 
         "certifications":
-            data.get(
-                "certifications",
-                []
-            ),
+            final_certifications,
 
 
         # =================================================
-        # PROJECTS / EXPERIENCE
+        # RESUME
+        # =================================================
+
+        "resume":
+            final_resume,
+
+
+        # =================================================
+        # PROJECTS
         # =================================================
 
         "projects":
-            data.get(
-                "projects",
-                []
-            ),
+            projects_data,
 
 
         # =================================================
@@ -334,36 +1207,58 @@ def register_student():
 
         "career_preferences": {
 
+            "interested_domain":
+                career_data.get(
+                    "interested_domain"
+                ),
+
             "preferred_job_role":
-                data.get(
+                career_data.get(
                     "preferred_job_role"
                 ),
 
             "preferred_location":
-                data.get(
+                career_data.get(
                     "preferred_location"
                 ),
 
             "internship_preferences":
-                data.get(
+                career_data.get(
                     "internship_preferences"
+                ),
+
+            "career_goal":
+                career_data.get(
+                    "career_goal"
+                ),
+
+            "learning_goal":
+                career_data.get(
+                    "learning_goal"
                 )
         },
 
 
         # =================================================
-        # LLM ANALYSIS
+        # LLM / AI ANALYSIS
         # =================================================
 
         "llm_analysis": {
 
-            "skill_summary": None,
+            "skill_summary":
+                None,
 
-            "strengths": [],
+            "detected_skills":
+                detected_skills,
 
-            "skill_gaps": [],
+            "strengths":
+                [],
 
-            "career_analysis": None
+            "skill_gaps":
+                [],
+
+            "career_analysis":
+                None
         },
 
 
@@ -371,7 +1266,8 @@ def register_student():
         # RECOMMENDATIONS
         # =================================================
 
-        "recommendations": [],
+        "recommendations":
+            [],
 
 
         # =================================================
@@ -381,18 +1277,52 @@ def register_student():
         "password":
             generate_password_hash(
                 data["password"]
+            ),
+
+
+        # =================================================
+        # CREATED DATE
+        # =================================================
+
+        "created_at":
+            datetime.now(
+                timezone.utc
             )
     }
 
 
-    # -----------------------------------------------------
-    # Save to MongoDB
-    # -----------------------------------------------------
+    # =====================================================
+    # SAVE TO MONGODB
+    # =====================================================
 
-    result = students_collection.insert_one(
-        student
-    )
+    try:
 
+        result = (
+            students_collection.insert_one(
+                student
+            )
+        )
+
+    except Exception as error:
+
+        print(
+            "MongoDB insertion error:",
+            error
+        )
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Failed to save student"
+
+        }), 500
+
+
+    # =====================================================
+    # SUCCESS
+    # =====================================================
 
     return jsonify({
 
@@ -402,7 +1332,44 @@ def register_student():
             "Student registered successfully",
 
         "student_id":
-            str(result.inserted_id)
+            str(
+                result.inserted_id
+            ),
+
+        "resume_uploaded":
+            uploaded_resume is not None,
+
+        "certificates_uploaded":
+            len(
+                uploaded_certificates
+            ),
+
+        "resume_text_extracted":
+            bool(
+                uploaded_resume
+                and uploaded_resume.get(
+                    "extracted_text"
+                )
+            ),
+
+        "certificate_texts_extracted":
+            sum(
+
+                1
+
+                for certificate
+                in uploaded_certificates
+
+                if certificate.get(
+                    "extracted_text"
+                )
+
+            ),
+
+        "skills_detected":
+            len(
+                detected_skills
+            )
 
     }), 201
 
@@ -421,85 +1388,107 @@ def login_student():
         silent=True
     )
 
-
     if not data:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid JSON data"
+
         }), 400
 
 
-    email = data.get("email")
+    email = data.get(
+        "email"
+    )
 
-    password = data.get("password")
+    password = data.get(
+        "password"
+    )
 
-
-    # -----------------------------------------------------
-    # Validate input
-    # -----------------------------------------------------
 
     if not email or not password:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Email and password are required"
+
         }), 400
 
 
-    # -----------------------------------------------------
-    # Find student
-    # -----------------------------------------------------
+    student = (
+        students_collection.find_one({
 
-    student = students_collection.find_one({
+            "personal.email":
+                email
 
-        "personal.email":
-            email
-
-    })
+        })
+    )
 
 
     if not student:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid email or password"
+
         }), 401
 
 
-    # -----------------------------------------------------
-    # Check password
-    # -----------------------------------------------------
+    stored_password = student.get(
+        "password"
+    )
 
-    password_valid = check_password_hash(
 
-        student["password"],
+    if not stored_password:
 
-        password
+        return jsonify({
 
+            "success": False,
+
+            "message":
+                "Password is not configured"
+
+        }), 500
+
+
+    password_valid = (
+        check_password_hash(
+
+            stored_password,
+
+            password
+
+        )
     )
 
 
     if not password_valid:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid email or password"
+
         }), 401
 
-
-    # -----------------------------------------------------
-    # Create JWT
-    # -----------------------------------------------------
 
     payload = {
 
         "student_id":
-            str(student["_id"]),
+            str(
+                student["_id"]
+            ),
 
         "email":
             student["personal"]["email"],
@@ -508,7 +1497,8 @@ def login_student():
             datetime.now(
                 timezone.utc
             )
-            + timedelta(
+            +
+            timedelta(
                 hours=24
             )
     }
@@ -538,18 +1528,25 @@ def login_student():
         "student": {
 
             "student_id":
-                str(student["_id"]),
+                str(
+                    student["_id"]
+                ),
 
             "full_name":
-                student["personal"]["full_name"],
+                student["personal"][
+                    "full_name"
+                ],
 
             "email":
-                student["personal"]["email"],
+                student["personal"][
+                    "email"
+                ],
 
             "register_number":
                 student["personal"][
                     "register_number"
                 ]
+
         }
 
     }), 200
@@ -577,36 +1574,36 @@ def get_student_profile(
     except InvalidId:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid student ID"
+
         }), 400
 
 
-    # -----------------------------------------------------
-    # Find student
-    # -----------------------------------------------------
+    student = (
+        students_collection.find_one({
 
-    student = students_collection.find_one({
+            "_id":
+                object_id
 
-        "_id":
-            object_id
-
-    })
+        })
+    )
 
 
     if not student:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Student not found"
+
         }), 404
 
-
-    # -----------------------------------------------------
-    # Never return password
-    # -----------------------------------------------------
 
     student.pop(
         "password",
@@ -650,15 +1647,14 @@ def update_student_profile(
     if not data:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid JSON data"
+
         }), 400
 
-
-    # -----------------------------------------------------
-    # Convert student ID
-    # -----------------------------------------------------
 
     try:
 
@@ -669,36 +1665,36 @@ def update_student_profile(
     except InvalidId:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Invalid student ID"
+
         }), 400
 
 
-    # -----------------------------------------------------
-    # Check student
-    # -----------------------------------------------------
+    student = (
+        students_collection.find_one({
 
-    student = students_collection.find_one({
+            "_id":
+                object_id
 
-        "_id":
-            object_id
-
-    })
+        })
+    )
 
 
     if not student:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "Student not found"
+
         }), 404
 
-
-    # -----------------------------------------------------
-    # Allowed profile sections
-    # -----------------------------------------------------
 
     allowed_fields = [
 
@@ -709,6 +1705,8 @@ def update_student_profile(
         "skills",
 
         "certifications",
+
+        "resume",
 
         "projects",
 
@@ -724,25 +1722,22 @@ def update_student_profile(
 
         if field in data:
 
-            update_data[field] = data[field]
+            update_data[field] = data[
+                field
+            ]
 
-
-    # -----------------------------------------------------
-    # Check update data
-    # -----------------------------------------------------
 
     if not update_data:
 
         return jsonify({
+
             "success": False,
+
             "message":
                 "No valid profile data provided"
+
         }), 400
 
-
-    # -----------------------------------------------------
-    # Update MongoDB
-    # -----------------------------------------------------
 
     students_collection.update_one(
 

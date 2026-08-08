@@ -1,4 +1,23 @@
-.env
-backend/venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+
+# Environment variables
+.env
+.env.*
+
+# Uploaded user files
+backend/uploads/
+uploads/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Build files
+dist/
+frontend/dist/
+
+# Vite
+.vite/
