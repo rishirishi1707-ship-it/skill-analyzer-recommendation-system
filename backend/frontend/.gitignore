@@ -1,23 +1,26 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
+# Node dependencies
+node_modules/
 
-# Environment variables
+# Vite build output
+dist/
+dist-ssr/
+
+# Environment variables / secrets
 .env
 .env.*
+!.env.example
 
-# Uploaded user files
-backend/uploads/
-uploads/
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Node
-node_modules/
-frontend/node_modules/
+# IDE
+.vscode/
+.idea/
 
-# Build files
-dist/
-frontend/dist/
-
-# Vite
-.vite/
+# OS
+.DS_Store
+Thumbs.db

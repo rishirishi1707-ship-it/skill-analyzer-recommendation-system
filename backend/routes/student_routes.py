@@ -15,6 +15,10 @@ from services.skill_extractor import (
     extract_skills_from_documents
 )
 
+from services.llm_worker import (
+    start_llm_analysis
+)
+
 from werkzeug.security import (
     generate_password_hash,
     check_password_hash
@@ -28,6 +32,7 @@ from bson.errors import InvalidId
 import jwt
 import os
 import uuid
+import json
 
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -38,6 +43,7 @@ from functools import wraps
 # =========================================================
 
 try:
+
     from pypdf import PdfReader
 
     PDF_AVAILABLE = True
@@ -48,6 +54,7 @@ except ImportError:
 
 
 try:
+
     from docx import Document
 
     DOCX_AVAILABLE = True
@@ -119,13 +126,11 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 def get_file_extension(filename):
 
     if not filename:
-
         return ""
 
     filename = filename.lower()
 
     if "." not in filename:
-
         return ""
 
     return filename.rsplit(
@@ -160,7 +165,6 @@ def allowed_file(
 def extract_pdf_text(file_path):
 
     if not PDF_AVAILABLE:
-
         return ""
 
     try:
@@ -202,7 +206,6 @@ def extract_pdf_text(file_path):
 def extract_docx_text(file_path):
 
     if not DOCX_AVAILABLE:
-
         return ""
 
     try:
@@ -427,6 +430,7 @@ def save_uploaded_file(
             datetime.now(
                 timezone.utc
             ).isoformat()
+
     }
 
 
@@ -566,8 +570,6 @@ def register_student():
 
             try:
 
-                import json
-
                 data = json.loads(
                     student_data
                 )
@@ -631,6 +633,7 @@ def register_student():
         "email",
 
         "password"
+
     ]
 
     for field in required_fields:
@@ -892,7 +895,7 @@ def register_student():
 
 
     # =====================================================
-    # AUTOMATIC SKILL EXTRACTION
+    # DOCUMENT TEXT
     # =====================================================
 
     resume_extracted_text = ""
@@ -927,9 +930,9 @@ def register_student():
             )
 
 
-    # -----------------------------------------------------
-    # Extract skills from documents
-    # -----------------------------------------------------
+    # =====================================================
+    # AUTOMATIC SKILL EXTRACTION
+    # =====================================================
 
     try:
 
@@ -952,7 +955,17 @@ def register_student():
             error
         )
 
-        detected_skills = []
+        detected_skills = {
+
+            "skills": [],
+
+            "categorized_skills": {},
+
+            "skill_details": [],
+
+            "document_count": 0
+
+        }
 
 
     # =====================================================
@@ -971,9 +984,7 @@ def register_student():
         "========================================"
     )
 
-    print(
-        detected_skills
-    )
+    print(detected_skills)
 
     print(
         "========================================\n"
@@ -1034,6 +1045,7 @@ def register_student():
 
         "file":
             uploaded_resume
+
     }
 
 
@@ -1108,6 +1120,7 @@ def register_student():
                 data.get(
                     "semester"
                 )
+
         },
 
 
@@ -1166,11 +1179,12 @@ def register_student():
                 academic_data.get(
                     "graduation_year"
                 )
+
         },
 
 
         # =================================================
-        # MANUALLY SELECTED SKILLS
+        # MANUALLY ENTERED SKILLS
         # =================================================
 
         "skills":
@@ -1236,14 +1250,18 @@ def register_student():
                 career_data.get(
                     "learning_goal"
                 )
+
         },
 
 
         # =================================================
-        # LLM / AI ANALYSIS
+        # LLM ANALYSIS
         # =================================================
 
         "llm_analysis": {
+
+            "status":
+                "pending",
 
             "skill_summary":
                 None,
@@ -1258,7 +1276,14 @@ def register_student():
                 [],
 
             "career_analysis":
+                None,
+
+            "learning_recommendations":
+                [],
+
+            "overall_assessment":
                 None
+
         },
 
 
@@ -1288,11 +1313,15 @@ def register_student():
             datetime.now(
                 timezone.utc
             )
+
     }
 
 
     # =====================================================
     # SAVE TO MONGODB
+    #
+    # IMPORTANT:
+    # Student is saved BEFORE LLM analysis.
     # =====================================================
 
     try:
@@ -1321,7 +1350,92 @@ def register_student():
 
 
     # =====================================================
-    # SUCCESS
+    # STUDENT ID
+    # =====================================================
+
+    student_id = str(
+        result.inserted_id
+    )
+
+
+    # =====================================================
+    # START BACKGROUND LLM ANALYSIS
+    #
+    # IMPORTANT:
+    # This does NOT block registration.
+    # =====================================================
+
+    try:
+
+        start_llm_analysis(
+            student_id
+        )
+
+        print(
+            "\n========================================"
+        )
+
+        print(
+            "BACKGROUND LLM ANALYSIS STARTED"
+        )
+
+        print(
+            "STUDENT ID:",
+            student_id
+        )
+
+        print(
+            "========================================\n"
+        )
+
+    except Exception as error:
+
+        print(
+            "Could not start background LLM analysis:",
+            error
+        )
+
+        # -------------------------------------------------
+        # Registration still succeeds.
+        # Mark analysis as failed only.
+        # -------------------------------------------------
+
+        try:
+
+            students_collection.update_one(
+
+                {
+                    "_id":
+                        result.inserted_id
+                },
+
+                {
+                    "$set": {
+
+                        "llm_analysis.status":
+                            "failed",
+
+                        "llm_analysis.error":
+                            str(error)
+
+                    }
+
+                }
+
+            )
+
+        except Exception as db_error:
+
+            print(
+                "Could not save LLM worker error:",
+                db_error
+            )
+
+
+    # =====================================================
+    # SUCCESS RESPONSE
+    #
+    # Registration finishes immediately.
     # =====================================================
 
     return jsonify({
@@ -1332,9 +1446,7 @@ def register_student():
             "Student registered successfully",
 
         "student_id":
-            str(
-                result.inserted_id
-            ),
+            student_id,
 
         "resume_uploaded":
             uploaded_resume is not None,
@@ -1346,10 +1458,13 @@ def register_student():
 
         "resume_text_extracted":
             bool(
+
                 uploaded_resume
+
                 and uploaded_resume.get(
                     "extracted_text"
                 )
+
             ),
 
         "certificate_texts_extracted":
@@ -1368,8 +1483,23 @@ def register_student():
 
         "skills_detected":
             len(
-                detected_skills
-            )
+
+                detected_skills.get(
+                    "skills",
+                    []
+                )
+
+                if isinstance(
+                    detected_skills,
+                    dict
+                )
+
+                else []
+
+            ),
+
+        "llm_analysis_status":
+            "pending"
 
     }), 201
 
@@ -1501,6 +1631,7 @@ def login_student():
             timedelta(
                 hours=24
             )
+
     }
 
 
@@ -1605,6 +1736,10 @@ def get_student_profile(
         }), 404
 
 
+    # -----------------------------------------------------
+    # Never send password to frontend
+    # -----------------------------------------------------
+
     student.pop(
         "password",
         None
@@ -1622,6 +1757,87 @@ def get_student_profile(
 
         "student":
             student
+
+    }), 200
+
+
+# =========================================================
+# GET LLM ANALYSIS
+# =========================================================
+
+@student_routes.route(
+    "/analysis",
+    methods=["GET"]
+)
+@token_required
+def get_llm_analysis(
+    student_id
+):
+
+    try:
+
+        object_id = ObjectId(
+            student_id
+        )
+
+    except InvalidId:
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Invalid student ID"
+
+        }), 400
+
+
+    student = (
+        students_collection.find_one(
+
+            {
+                "_id":
+                    object_id
+            },
+
+            {
+                "llm_analysis": 1
+            }
+
+        )
+    )
+
+
+    if not student:
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Student not found"
+
+        }), 404
+
+
+    analysis = student.get(
+        "llm_analysis",
+        {}
+    )
+
+
+    return jsonify({
+
+        "success": True,
+
+        "status":
+            analysis.get(
+                "status",
+                "pending"
+            ),
+
+        "analysis":
+            analysis
 
     }), 200
 

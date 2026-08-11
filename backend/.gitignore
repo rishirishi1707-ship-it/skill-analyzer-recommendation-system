@@ -1,23 +1,35 @@
-# Python
+# Python cache
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 
-# Environment variables
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment variables / secrets
 .env
 .env.*
+!.env.example
 
-# Uploaded user files
-backend/uploads/
+# Uploaded files
 uploads/
+backend/uploads/
 
-# Node
-node_modules/
-frontend/node_modules/
+# Python tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Build files
-dist/
-frontend/dist/
+# Logs
+*.log
 
-# Vite
-.vite/
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
