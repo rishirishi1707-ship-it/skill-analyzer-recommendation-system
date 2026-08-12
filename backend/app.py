@@ -1,12 +1,20 @@
-from flask import Flask, jsonify
+# =========================================================
+# app.py
+# Skill Analyzer & Recommendation System
+# =========================================================
+
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+
 import os
+
 
 # =========================================================
 # FLASK APP
 # =========================================================
 
 app = Flask(__name__)
+
 
 # =========================================================
 # CORS
@@ -21,19 +29,29 @@ CORS(
     }
 )
 
+
 # =========================================================
 # CONFIGURATION
 # =========================================================
 
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
+# Maximum total request size
+app.config["MAX_CONTENT_LENGTH"] = (
+    16 * 1024 * 1024
+)  # 16 MB
+
 
 # =========================================================
-# UPLOAD DIRECTORIES
+# BASE DIRECTORY
 # =========================================================
 
 BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
 )
+
+
+# =========================================================
+# UPLOAD DIRECTORIES
+# =========================================================
 
 UPLOAD_FOLDER = os.path.join(
     BASE_DIR,
@@ -50,6 +68,16 @@ CERTIFICATE_FOLDER = os.path.join(
     "certificates"
 )
 
+
+# =========================================================
+# CREATE UPLOAD DIRECTORIES
+# =========================================================
+
+os.makedirs(
+    UPLOAD_FOLDER,
+    exist_ok=True
+)
+
 os.makedirs(
     RESUME_FOLDER,
     exist_ok=True
@@ -60,9 +88,22 @@ os.makedirs(
     exist_ok=True
 )
 
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["RESUME_FOLDER"] = RESUME_FOLDER
-app.config["CERTIFICATE_FOLDER"] = CERTIFICATE_FOLDER
+
+# =========================================================
+# FLASK CONFIGURATION
+# =========================================================
+
+app.config["UPLOAD_FOLDER"] = (
+    UPLOAD_FOLDER
+)
+
+app.config["RESUME_FOLDER"] = (
+    RESUME_FOLDER
+)
+
+app.config["CERTIFICATE_FOLDER"] = (
+    CERTIFICATE_FOLDER
+)
 
 
 # =========================================================
@@ -71,7 +112,9 @@ app.config["CERTIFICATE_FOLDER"] = CERTIFICATE_FOLDER
 
 try:
 
-    from routes.student_routes import student_routes
+    from routes.student_routes import (
+        student_routes
+    )
 
     app.register_blueprint(
         student_routes,
@@ -88,7 +131,41 @@ except Exception as error:
         "ERROR: Could not load student routes."
     )
 
-    print(error)
+    print(
+        error
+    )
+
+    raise
+
+
+# =========================================================
+# REGISTER JOB ROUTES
+# =========================================================
+
+try:
+
+    from routes.job_routes import (
+        job_routes
+    )
+
+    app.register_blueprint(
+        job_routes,
+        url_prefix="/api/jobs"
+    )
+
+    print(
+        "Job routes registered successfully."
+    )
+
+except Exception as error:
+
+    print(
+        "ERROR: Could not load job routes."
+    )
+
+    print(
+        error
+    )
 
     raise
 
@@ -97,7 +174,10 @@ except Exception as error:
 # HOME / SERVER TEST
 # =========================================================
 
-@app.route("/", methods=["GET"])
+@app.route(
+    "/",
+    methods=["GET"]
+)
 def home():
 
     return jsonify({
@@ -117,7 +197,10 @@ def home():
 # API HEALTH CHECK
 # =========================================================
 
-@app.route("/api/health", methods=["GET"])
+@app.route(
+    "/api/health",
+    methods=["GET"]
+)
 def health_check():
 
     return jsonify({
@@ -134,7 +217,7 @@ def health_check():
 
 
 # =========================================================
-# 404 HANDLER
+# 404 ERROR HANDLER
 # =========================================================
 
 @app.errorhandler(404)
@@ -148,17 +231,13 @@ def not_found(error):
             "API endpoint not found",
 
         "path":
-            getattr(
-                error,
-                "description",
-                "Unknown endpoint"
-            )
+            request.path
 
     }), 404
 
 
 # =========================================================
-# GENERAL ERROR HANDLER
+# GENERAL 500 ERROR HANDLER
 # =========================================================
 
 @app.errorhandler(500)
@@ -180,30 +259,85 @@ def internal_error(error):
 
 if __name__ == "__main__":
 
-    print("\n========================================")
-    print(" SKILL ANALYZER BACKEND")
-    print("========================================")
     print(
-        "Backend folder:",
+        "\n========================================"
+    )
+
+    print(
+        "       SKILL ANALYZER BACKEND"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "Backend folder:"
+    )
+
+    print(
         BASE_DIR
     )
+
     print(
-        "Resume folder:",
+        "\nUpload folder:"
+    )
+
+    print(
+        UPLOAD_FOLDER
+    )
+
+    print(
+        "\nResume folder:"
+    )
+
+    print(
         RESUME_FOLDER
     )
+
     print(
-        "Certificate folder:",
+        "\nCertificate folder:"
+    )
+
+    print(
         CERTIFICATE_FOLDER
     )
+
     print(
-        "Student API:",
+        "\nStudent API:"
+    )
+
+    print(
         "http://127.0.0.1:5000/api/students"
     )
+
     print(
-        "Health API:",
+        "\nJob API:"
+    )
+
+    print(
+        "http://127.0.0.1:5000/api/jobs"
+    )
+
+    print(
+        "\nHealth API:"
+    )
+
+    print(
         "http://127.0.0.1:5000/api/health"
     )
-    print("========================================\n")
+
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "Server starting..."
+    )
+
+    print(
+        "========================================\n"
+    )
 
     app.run(
         host="127.0.0.1",

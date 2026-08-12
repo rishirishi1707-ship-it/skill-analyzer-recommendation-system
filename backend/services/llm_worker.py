@@ -3,12 +3,21 @@
 # =========================================================
 
 import threading
+
 from datetime import datetime, timezone
 
 from bson import ObjectId
 
 from config import db
-from services.llm_analyzer import analyze_student
+
+from services.llm_analyzer import (
+    analyze_student
+)
+
+from services.student_scorer import (
+    calculate_student_score,
+    get_score_label
+)
 
 
 # =========================================================
@@ -19,55 +28,73 @@ students_collection = db["students"]
 
 
 # =========================================================
-# LLM BACKGROUND WORKER
+# BACKGROUND LLM ANALYSIS
 # =========================================================
 
 def run_llm_analysis(student_id):
-    """
-    Runs LLM analysis after student registration.
 
-    This function runs independently from the registration
-    request so the student does not have to wait for Ollama.
-    """
+    print(
+        "\n========================================"
+    )
 
-    print("\n========================================")
-    print("BACKGROUND LLM ANALYSIS STARTED")
-    print("Student ID:", student_id)
-    print("========================================\n")
+    print(
+        "BACKGROUND LLM ANALYSIS STARTED"
+    )
+
+    print(
+        "Student ID:",
+        student_id
+    )
+
+    print(
+        "========================================\n"
+    )
+
 
     try:
 
-        # -------------------------------------------------
-        # Convert ID
-        # -------------------------------------------------
+        # =================================================
+        # CONVERT ID
+        # =================================================
 
-        object_id = ObjectId(student_id)
+        object_id = ObjectId(
+            student_id
+        )
 
-        # -------------------------------------------------
-        # Get student from MongoDB
-        # -------------------------------------------------
 
-        student = students_collection.find_one({
-            "_id": object_id
-        })
+        # =================================================
+        # GET STUDENT
+        # =================================================
+
+        student = (
+            students_collection.find_one({
+
+                "_id":
+                    object_id
+
+            })
+        )
+
 
         if not student:
 
             print(
-                "Background LLM error: "
-                "Student not found"
+                "Background LLM error:"
+                " Student not found"
             )
 
             return
 
-        # -------------------------------------------------
-        # Mark analysis as processing
-        # -------------------------------------------------
+
+        # =================================================
+        # MARK ANALYSIS AS PROCESSING
+        # =================================================
 
         students_collection.update_one(
 
             {
-                "_id": object_id
+                "_id":
+                    object_id
             },
 
             {
@@ -86,99 +113,63 @@ def run_llm_analysis(student_id):
 
         )
 
-        # -------------------------------------------------
-        # Call Ollama
-        # -------------------------------------------------
 
-        result = analyze_student(student)
+        # =================================================
+        # RUN LLM ANALYSIS
+        # =================================================
 
-        print("\n========================================")
-        print("BACKGROUND LLM ANALYSIS COMPLETED")
-        print("========================================")
-        print(result)
-        print("========================================\n")
+        print(
+            "Sending student data to Ollama..."
+        )
 
-        # -------------------------------------------------
-        # Successful analysis
-        # -------------------------------------------------
 
-        if isinstance(result, dict):
+        result = analyze_student(
+            student
+        )
 
-            if "error" in result:
 
-                students_collection.update_one(
+        print(
+            "\n========================================"
+        )
 
-                    {
-                        "_id": object_id
-                    },
+        print(
+            "LLM ANALYSIS COMPLETED"
+        )
 
-                    {
-                        "$set": {
+        print(
+            "========================================"
+        )
 
-                            "llm_analysis.status":
-                                "failed",
+        print(
+            result
+        )
 
-                            "llm_analysis.error":
-                                result.get(
-                                    "error"
-                                ),
+        print(
+            "========================================\n"
+        )
 
-                            "llm_analysis.raw_response":
-                                result.get(
-                                    "raw_response"
-                                ),
 
-                            "llm_analysis.completed_at":
-                                datetime.now(
-                                    timezone.utc
-                                )
+        # =================================================
+        # HANDLE LLM ERROR
+        # =================================================
 
-                        }
-                    }
+        if not isinstance(
+            result,
+            dict
+        ):
 
-                )
+            raise ValueError(
+                "Invalid LLM response"
+            )
 
-            else:
 
-                # -----------------------------------------
-                # Store complete LLM result
-                # -----------------------------------------
-
-                update_data = dict(result)
-
-                update_data[
-                    "status"
-                ] = "completed"
-
-                update_data[
-                    "completed_at"
-                ] = datetime.now(
-                    timezone.utc
-                )
-
-                students_collection.update_one(
-
-                    {
-                        "_id": object_id
-                    },
-
-                    {
-                        "$set": {
-
-                            "llm_analysis":
-                                update_data
-
-                        }
-                    }
-
-                )
-
-        else:
+        if "error" in result:
 
             students_collection.update_one(
 
                 {
-                    "_id": object_id
+                    "_id":
+                        object_id
                 },
 
                 {
@@ -188,7 +179,14 @@ def run_llm_analysis(student_id):
                             "failed",
 
                         "llm_analysis.error":
-                            "Invalid LLM response",
+                            result.get(
+                                "error"
+                            ),
+
+                        "llm_analysis.raw_response":
+                            result.get(
+                                "raw_response"
+                            ),
 
                         "llm_analysis.completed_at":
                             datetime.now(
@@ -200,17 +198,220 @@ def run_llm_analysis(student_id):
 
             )
 
+            return
+
+
+        # =================================================
+        # CALCULATE STUDENT SCORE
+        # =================================================
+
+        print(
+            "\n========================================"
+        )
+
+        print(
+            "CALCULATING STUDENT SCORE"
+        )
+
+        print(
+            "========================================"
+        )
+
+
+        # -------------------------------------------------
+        # IMPORTANT
+        #
+        # The LLM result is temporarily merged into the
+        # student data so future scoring can use detected
+        # information if needed.
+        # -------------------------------------------------
+
+        scoring_student = dict(
+            student
+        )
+
+
+        scoring_student[
+            "llm_analysis"
+        ] = result
+
+
+        # -------------------------------------------------
+        # Calculate deterministic score
+        # -------------------------------------------------
+
+        score_result = (
+            calculate_student_score(
+                scoring_student
+            )
+        )
+
+
+        student_score = (
+            score_result.get(
+                "score",
+                0.0
+            )
+        )
+
+
+        score_label = (
+            get_score_label(
+                student_score
+            )
+        )
+
+
+        print(
+            "Student Score:",
+            student_score,
+            "/ 10"
+        )
+
+
+        print(
+            "Score Label:",
+            score_label
+        )
+
+
+        print(
+            "========================================\n"
+        )
+
+
+        # =================================================
+        # PREPARE LLM ANALYSIS DATA
+        # =================================================
+
+        llm_analysis_data = dict(
+            result
+        )
+
+
+        llm_analysis_data[
+            "status"
+        ] = "completed"
+
+
+        llm_analysis_data[
+            "completed_at"
+        ] = datetime.now(
+            timezone.utc
+        )
+
+
+        # =================================================
+        # STORE SCORE
+        # =================================================
+
+        llm_analysis_data[
+            "student_score"
+        ] = student_score
+
+
+        llm_analysis_data[
+            "score_scale"
+        ] = "0-10"
+
+
+        llm_analysis_data[
+            "score_label"
+        ] = score_label
+
+
+        llm_analysis_data[
+            "score_components"
+        ] = score_result.get(
+            "components",
+            {}
+        )
+
+
+        # =================================================
+        # SAVE EVERYTHING
+        # =================================================
+
+        students_collection.update_one(
+
+            {
+                "_id":
+                    object_id
+            },
+
+            {
+                "$set": {
+
+                    "llm_analysis":
+                        llm_analysis_data,
+
+                    "student_score":
+                        student_score,
+
+                    "student_score_label":
+                        score_label,
+
+                    "student_score_components":
+                        score_result.get(
+                            "components",
+                            {}
+                        )
+
+                }
+            }
+
+        )
+
+
+        print(
+            "\n========================================"
+        )
+
+        print(
+            "BACKGROUND PROCESS COMPLETED"
+        )
+
+        print(
+            "Student Score:",
+            student_score,
+            "/10"
+        )
+
+        print(
+            "========================================\n"
+        )
+
+
+    # =====================================================
+    # BACKGROUND WORKER ERROR
+    # =====================================================
+
     except Exception as error:
 
-        print("\n========================================")
-        print("BACKGROUND LLM ANALYSIS ERROR")
-        print("========================================")
-        print(error)
-        print("========================================\n")
+        print(
+            "\n========================================"
+        )
 
-        # -------------------------------------------------
-        # Save error without breaking registration
-        # -------------------------------------------------
+        print(
+            "BACKGROUND LLM ANALYSIS ERROR"
+        )
+
+        print(
+            "========================================"
+        )
+
+        print(
+            error
+        )
+
+        print(
+            "========================================\n"
+        )
+
+
+        # =================================================
+        # SAVE ERROR TO MONGODB
+        # =================================================
 
         try:
 
@@ -218,7 +419,9 @@ def run_llm_analysis(student_id):
 
                 {
                     "_id":
-                        ObjectId(student_id)
+                        ObjectId(
+                            student_id
+                        )
                 },
 
                 {
@@ -228,7 +431,9 @@ def run_llm_analysis(student_id):
                             "failed",
 
                         "llm_analysis.error":
-                            str(error),
+                            str(
+                                error
+                            ),
 
                         "llm_analysis.completed_at":
                             datetime.now(
@@ -252,11 +457,14 @@ def run_llm_analysis(student_id):
 # START BACKGROUND WORKER
 # =========================================================
 
-def start_llm_analysis(student_id):
+def start_llm_analysis(
+    student_id
+):
+
     """
     Starts the LLM analysis in a background thread.
 
-    The thread is intentionally NOT marked as daemon.
+    Registration does NOT wait for Ollama.
     """
 
     worker = threading.Thread(
@@ -271,6 +479,33 @@ def start_llm_analysis(student_id):
 
     )
 
+
     worker.start()
 
+
     return worker
+
+
+# =========================================================
+# BACKWARD-COMPATIBILITY ALIAS
+# =========================================================
+
+def start_background_llm_analysis(
+    student_id
+):
+
+    """
+    Compatibility wrapper.
+
+    This allows student_routes.py to use either:
+
+        start_llm_analysis()
+
+    or:
+
+        start_background_llm_analysis()
+    """
+
+    return start_llm_analysis(
+        student_id
+    )

@@ -16,7 +16,7 @@ from services.skill_extractor import (
 )
 
 from services.llm_worker import (
-    start_llm_analysis
+    start_background_llm_analysis
 )
 
 from werkzeug.security import (
@@ -34,7 +34,12 @@ import os
 import uuid
 import json
 
-from datetime import datetime, timedelta, timezone
+from datetime import (
+    datetime,
+    timedelta,
+    timezone
+)
+
 from functools import wraps
 
 
@@ -120,17 +125,30 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
 # =========================================================
+# HELPER - CURRENT UTC TIME
+# =========================================================
+
+def utc_now():
+
+    return datetime.now(
+        timezone.utc
+    )
+
+
+# =========================================================
 # HELPER - FILE EXTENSION
 # =========================================================
 
 def get_file_extension(filename):
 
     if not filename:
+
         return ""
 
     filename = filename.lower()
 
     if "." not in filename:
+
         return ""
 
     return filename.rsplit(
@@ -165,6 +183,7 @@ def allowed_file(
 def extract_pdf_text(file_path):
 
     if not PDF_AVAILABLE:
+
         return ""
 
     try:
@@ -206,6 +225,7 @@ def extract_pdf_text(file_path):
 def extract_docx_text(file_path):
 
     if not DOCX_AVAILABLE:
+
         return ""
 
     try:
@@ -333,7 +353,7 @@ def save_uploaded_file(
         )
 
     # -----------------------------------------------------
-    # Secure original filename
+    # Secure filename
     # -----------------------------------------------------
 
     safe_filename = secure_filename(
@@ -370,7 +390,7 @@ def save_uploaded_file(
     )
 
     # -----------------------------------------------------
-    # Check actual file size
+    # Check file size
     # -----------------------------------------------------
 
     file_size = os.path.getsize(
@@ -427,10 +447,7 @@ def save_uploaded_file(
             extracted_text,
 
         "uploaded_at":
-            datetime.now(
-                timezone.utc
-            ).isoformat()
-
+            utc_now()
     }
 
 
@@ -441,7 +458,10 @@ def save_uploaded_file(
 def token_required(function):
 
     @wraps(function)
-    def decorated(*args, **kwargs):
+    def decorated(
+        *args,
+        **kwargs
+    ):
 
         auth_header = request.headers.get(
             "Authorization"
@@ -547,7 +567,7 @@ def register_student():
     data = None
 
     # -----------------------------------------------------
-    # JSON request
+    # JSON
     # -----------------------------------------------------
 
     if request.is_json:
@@ -557,7 +577,7 @@ def register_student():
         )
 
     # -----------------------------------------------------
-    # Multipart request
+    # MULTIPART FORM
     # -----------------------------------------------------
 
     else:
@@ -613,7 +633,9 @@ def register_student():
         "========================================"
     )
 
-    print(data)
+    print(
+        data
+    )
 
     print(
         "========================================\n"
@@ -969,7 +991,7 @@ def register_student():
 
 
     # =====================================================
-    # DEBUG SKILL EXTRACTION
+    # DEBUG SKILLS
     # =====================================================
 
     print(
@@ -984,7 +1006,9 @@ def register_student():
         "========================================"
     )
 
-    print(detected_skills)
+    print(
+        detected_skills
+    )
 
     print(
         "========================================\n"
@@ -1184,11 +1208,68 @@ def register_student():
 
 
         # =================================================
-        # MANUALLY ENTERED SKILLS
+        # PREFERRED / SELF-DECLARED SKILLS
         # =================================================
 
         "skills":
             skills_data,
+
+
+        # =================================================
+        # AUTOMATICALLY DETECTED SKILLS
+        # =================================================
+
+        "detected_skills": {
+
+            "resume": (
+                detected_skills.get(
+                    "resume_skills",
+                    []
+                )
+                if isinstance(
+                    detected_skills,
+                    dict
+                )
+                else []
+            ),
+
+            "certificates": (
+                detected_skills.get(
+                    "certificate_skills",
+                    []
+                )
+                if isinstance(
+                    detected_skills,
+                    dict
+                )
+                else []
+            ),
+
+            "all": (
+                detected_skills.get(
+                    "skills",
+                    []
+                )
+                if isinstance(
+                    detected_skills,
+                    dict
+                )
+                else []
+            ),
+
+            "details": (
+                detected_skills.get(
+                    "skill_details",
+                    []
+                )
+                if isinstance(
+                    detected_skills,
+                    dict
+                )
+                else []
+            )
+
+        },
 
 
         # =================================================
@@ -1266,8 +1347,8 @@ def register_student():
             "skill_summary":
                 None,
 
-            "detected_skills":
-                detected_skills,
+            "overall_score":
+                None,
 
             "strengths":
                 [],
@@ -1288,10 +1369,10 @@ def register_student():
 
 
         # =================================================
-        # RECOMMENDATIONS
+        # JOB RECOMMENDATIONS
         # =================================================
 
-        "recommendations":
+        "job_recommendations":
             [],
 
 
@@ -1310,18 +1391,16 @@ def register_student():
         # =================================================
 
         "created_at":
-            datetime.now(
-                timezone.utc
-            )
+            utc_now()
 
     }
 
 
     # =====================================================
-    # SAVE TO MONGODB
+    # SAVE STUDENT TO MONGODB
     #
     # IMPORTANT:
-    # Student is saved BEFORE LLM analysis.
+    # Student is saved BEFORE starting Ollama.
     # =====================================================
 
     try:
@@ -1362,80 +1441,59 @@ def register_student():
     # START BACKGROUND LLM ANALYSIS
     #
     # IMPORTANT:
-    # This does NOT block registration.
+    # Do NOT call analyze_student() here.
     # =====================================================
 
     try:
 
-        start_llm_analysis(
+        start_background_llm_analysis(
             student_id
         )
 
         print(
-            "\n========================================"
-        )
-
-        print(
-            "BACKGROUND LLM ANALYSIS STARTED"
-        )
-
-        print(
-            "STUDENT ID:",
-            student_id
-        )
-
-        print(
-            "========================================\n"
+            "Background LLM analysis "
+            "queued successfully."
         )
 
     except Exception as error:
 
         print(
-            "Could not start background LLM analysis:",
+            "Could not start background "
+            "LLM analysis:",
             error
         )
 
-        # -------------------------------------------------
-        # Registration still succeeds.
-        # Mark analysis as failed only.
-        # -------------------------------------------------
+        # -----------------------------------------------
+        # Registration is already successful.
+        # Save the worker error for debugging.
+        # -----------------------------------------------
 
-        try:
+        students_collection.update_one(
 
-            students_collection.update_one(
+            {
+                "_id":
+                    result.inserted_id
+            },
 
-                {
-                    "_id":
-                        result.inserted_id
-                },
+            {
+                "$set": {
 
-                {
-                    "$set": {
+                    "llm_analysis.status":
+                        "failed",
 
-                        "llm_analysis.status":
-                            "failed",
-
-                        "llm_analysis.error":
-                            str(error)
-
-                    }
+                    "llm_analysis.error":
+                        str(error)
 
                 }
+            }
 
-            )
-
-        except Exception as db_error:
-
-            print(
-                "Could not save LLM worker error:",
-                db_error
-            )
+        )
 
 
     # =====================================================
-    # SUCCESS RESPONSE
+    # REGISTRATION SUCCESS
     #
-    # Registration finishes immediately.
+    # THIS RESPONSE DOES NOT WAIT FOR OLLAMA.
     # =====================================================
 
     return jsonify({
@@ -1447,6 +1505,9 @@ def register_student():
 
         "student_id":
             student_id,
+
+        "llm_analysis_status":
+            "pending",
 
         "resume_uploaded":
             uploaded_resume is not None,
@@ -1496,10 +1557,7 @@ def register_student():
 
                 else []
 
-            ),
-
-        "llm_analysis_status":
-            "pending"
+            )
 
     }), 201
 
@@ -1590,15 +1648,21 @@ def login_student():
         }), 500
 
 
-    password_valid = (
-        check_password_hash(
+    try:
 
-            stored_password,
+        password_valid = (
+            check_password_hash(
 
-            password
+                stored_password,
 
+                password
+
+            )
         )
-    )
+
+    except Exception:
+
+        password_valid = False
 
 
     if not password_valid:
@@ -1624,9 +1688,7 @@ def login_student():
             student["personal"]["email"],
 
         "exp":
-            datetime.now(
-                timezone.utc
-            )
+            utc_now()
             +
             timedelta(
                 hours=24
@@ -1737,7 +1799,7 @@ def get_student_profile(
 
 
     # -----------------------------------------------------
-    # Never send password to frontend
+    # Never send password
     # -----------------------------------------------------
 
     student.pop(
@@ -1762,7 +1824,7 @@ def get_student_profile(
 
 
 # =========================================================
-# GET LLM ANALYSIS
+# GET LLM ANALYSIS STATUS / RESULT
 # =========================================================
 
 @student_routes.route(
@@ -1770,7 +1832,7 @@ def get_student_profile(
     methods=["GET"]
 )
 @token_required
-def get_llm_analysis(
+def get_student_analysis(
     student_id
 ):
 
@@ -1829,12 +1891,6 @@ def get_llm_analysis(
     return jsonify({
 
         "success": True,
-
-        "status":
-            analysis.get(
-                "status",
-                "pending"
-            ),
 
         "analysis":
             analysis
@@ -1912,6 +1968,10 @@ def update_student_profile(
         }), 404
 
 
+    # =====================================================
+    # ALLOWED PROFILE FIELDS
+    # =====================================================
+
     allowed_fields = [
 
         "personal",
@@ -1919,6 +1979,8 @@ def update_student_profile(
         "academic",
 
         "skills",
+
+        "detected_skills",
 
         "certifications",
 
@@ -1953,6 +2015,11 @@ def update_student_profile(
                 "No valid profile data provided"
 
         }), 400
+
+
+    update_data[
+        "updated_at"
+    ] = utc_now()
 
 
     students_collection.update_one(
