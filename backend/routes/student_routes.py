@@ -16,7 +16,7 @@ from services.skill_extractor import (
 )
 
 from services.llm_worker import (
-    start_background_llm_analysis
+    start_llm_analysis
 )
 
 from werkzeug.security import (
@@ -48,24 +48,20 @@ from functools import wraps
 # =========================================================
 
 try:
-
     from pypdf import PdfReader
 
     PDF_AVAILABLE = True
 
 except ImportError:
-
     PDF_AVAILABLE = False
 
 
 try:
-
     from docx import Document
 
     DOCX_AVAILABLE = True
 
 except ImportError:
-
     DOCX_AVAILABLE = False
 
 
@@ -142,13 +138,11 @@ def utc_now():
 def get_file_extension(filename):
 
     if not filename:
-
         return ""
 
     filename = filename.lower()
 
     if "." not in filename:
-
         return ""
 
     return filename.rsplit(
@@ -183,7 +177,6 @@ def allowed_file(
 def extract_pdf_text(file_path):
 
     if not PDF_AVAILABLE:
-
         return ""
 
     try:
@@ -225,7 +218,6 @@ def extract_pdf_text(file_path):
 def extract_docx_text(file_path):
 
     if not DOCX_AVAILABLE:
-
         return ""
 
     try:
@@ -331,7 +323,6 @@ def save_uploaded_file(
 ):
 
     if not uploaded_file:
-
         return None
 
     original_filename = (
@@ -339,7 +330,6 @@ def save_uploaded_file(
     )
 
     if not original_filename:
-
         return None
 
     if not allowed_file(
@@ -633,9 +623,7 @@ def register_student():
         "========================================"
     )
 
-    print(
-        data
-    )
+    print(data)
 
     print(
         "========================================\n"
@@ -985,6 +973,10 @@ def register_student():
 
             "skill_details": [],
 
+            "resume_skills": [],
+
+            "certificate_skills": [],
+
             "document_count": 0
 
         }
@@ -1208,7 +1200,7 @@ def register_student():
 
 
         # =================================================
-        # PREFERRED / SELF-DECLARED SKILLS
+        # MANUALLY ENTERED SKILLS
         # =================================================
 
         "skills":
@@ -1221,53 +1213,41 @@ def register_student():
 
         "detected_skills": {
 
-            "resume": (
+            "resume":
                 detected_skills.get(
                     "resume_skills",
                     []
-                )
-                if isinstance(
-                    detected_skills,
-                    dict
-                )
-                else []
-            ),
+                ),
 
-            "certificates": (
+            "certificates":
                 detected_skills.get(
                     "certificate_skills",
                     []
-                )
-                if isinstance(
-                    detected_skills,
-                    dict
-                )
-                else []
-            ),
+                ),
 
-            "all": (
+            "all":
                 detected_skills.get(
                     "skills",
                     []
-                )
-                if isinstance(
-                    detected_skills,
-                    dict
-                )
-                else []
-            ),
+                ),
 
-            "details": (
+            "categorized_skills":
+                detected_skills.get(
+                    "categorized_skills",
+                    {}
+                ),
+
+            "details":
                 detected_skills.get(
                     "skill_details",
                     []
+                ),
+
+            "document_count":
+                detected_skills.get(
+                    "document_count",
+                    0
                 )
-                if isinstance(
-                    detected_skills,
-                    dict
-                )
-                else []
-            )
 
         },
 
@@ -1398,9 +1378,6 @@ def register_student():
 
     # =====================================================
     # SAVE STUDENT TO MONGODB
-    #
-    # IMPORTANT:
-    # Student is saved BEFORE starting Ollama.
     # =====================================================
 
     try:
@@ -1439,20 +1416,17 @@ def register_student():
 
     # =====================================================
     # START BACKGROUND LLM ANALYSIS
-    #
-    # IMPORTANT:
-    # Do NOT call analyze_student() here.
     # =====================================================
 
     try:
 
-        start_background_llm_analysis(
+        start_llm_analysis(
             student_id
         )
 
         print(
             "Background LLM analysis "
-            "queued successfully."
+            "started successfully."
         )
 
     except Exception as error:
@@ -1462,11 +1436,6 @@ def register_student():
             "LLM analysis:",
             error
         )
-
-        # -----------------------------------------------
-        # Registration is already successful.
-        # Save the worker error for debugging.
-        # -----------------------------------------------
 
         students_collection.update_one(
 
@@ -1482,9 +1451,13 @@ def register_student():
                         "failed",
 
                     "llm_analysis.error":
-                        str(error)
+                        str(error),
+
+                    "llm_analysis.completed_at":
+                        utc_now()
 
                 }
+
             }
 
         )
@@ -1492,8 +1465,6 @@ def register_student():
 
     # =====================================================
     # REGISTRATION SUCCESS
-    #
-    # THIS RESPONSE DOES NOT WAIT FOR OLLAMA.
     # =====================================================
 
     return jsonify({
@@ -1519,13 +1490,10 @@ def register_student():
 
         "resume_text_extracted":
             bool(
-
                 uploaded_resume
-
                 and uploaded_resume.get(
                     "extracted_text"
                 )
-
             ),
 
         "certificate_texts_extracted":
@@ -1652,11 +1620,8 @@ def login_student():
 
         password_valid = (
             check_password_hash(
-
                 stored_password,
-
                 password
-
             )
         )
 
@@ -1799,14 +1764,13 @@ def get_student_profile(
 
 
     # -----------------------------------------------------
-    # Never send password
+    # Never return password
     # -----------------------------------------------------
 
     student.pop(
         "password",
         None
     )
-
 
     student["_id"] = str(
         student["_id"]
@@ -1914,7 +1878,6 @@ def update_student_profile(
     data = request.get_json(
         silent=True
     )
-
 
     if not data:
 
