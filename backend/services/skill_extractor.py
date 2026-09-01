@@ -250,13 +250,7 @@ def normalize_skill_name(skill):
 # ============================================================
 # SKILL MATCHING
 # ============================================================
-
 def skill_exists(text, skill):
-    """
-    Check whether a skill exists in the text.
-
-    Uses case-insensitive matching and word boundaries.
-    """
 
     if not text or not skill:
         return False
@@ -284,47 +278,35 @@ def skill_exists(text, skill):
         normalized_text,
         flags=re.IGNORECASE
     ) is not None
-
-
 # ============================================================
 # SPECIAL OCR SKILL MATCHING
 # ============================================================
 
 def skill_exists_ocr_safe(text, skill):
     """
-    OCR-safe skill matching.
+    Safely check whether a skill exists in document text.
 
-    This is especially useful for:
-        C++
-        C
-        C++
-        Node.js
-        Express.js
-        CI/CD
-        C#
+    Uses regex boundaries instead of simple substring matching
+    to avoid false detections such as:
+
+    - "R" matching every letter r
+    - "C" matching every letter c
+    - "Go" matching words like "goal"
     """
 
     if not text or not skill:
         return False
 
-    normalized_text = normalize_text(
-        text
-    ).lower()
+    normalized_text = normalize_text(text)
 
     normalized_skill = normalize_skill_name(
         skill
-    ).lower()
+    )
 
-    # Direct search first
-    if normalized_skill in normalized_text:
-        return True
-
-    # Regex search
     return skill_exists(
         normalized_text,
         normalized_skill
     )
-
 
 # ============================================================
 # EXTRACT SKILLS BY CATEGORY
