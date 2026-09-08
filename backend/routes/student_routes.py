@@ -1,5 +1,6 @@
 # =========================================================
 # routes/student_routes.py
+# Skill Analyzer & Recommendation System
 # =========================================================
 
 from flask import (
@@ -17,6 +18,10 @@ from services.skill_extractor import (
 
 from services.llm_worker import (
     start_llm_analysis
+)
+
+from services.job_matcher import (
+    recommend_jobs
 )
 
 from werkzeug.security import (
@@ -48,20 +53,24 @@ from functools import wraps
 # =========================================================
 
 try:
+
     from pypdf import PdfReader
 
     PDF_AVAILABLE = True
 
 except ImportError:
+
     PDF_AVAILABLE = False
 
 
 try:
+
     from docx import Document
 
     DOCX_AVAILABLE = True
 
 except ImportError:
+
     DOCX_AVAILABLE = False
 
 
@@ -76,10 +85,16 @@ student_routes = Blueprint(
 
 
 # =========================================================
-# MONGODB COLLECTION
+# MONGODB COLLECTIONS
 # =========================================================
 
-students_collection = db["students"]
+students_collection = db[
+    "students"
+]
+
+jobs_collection = db[
+    "job_requirements"
+]
 
 
 # =========================================================
@@ -106,6 +121,7 @@ ALLOWED_RESUME_EXTENSIONS = {
     "docx"
 }
 
+
 ALLOWED_CERTIFICATE_EXTENSIONS = {
     "pdf",
     "docx"
@@ -117,6 +133,7 @@ ALLOWED_CERTIFICATE_EXTENSIONS = {
 # =========================================================
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
+
 # 10 MB per file
 
 
@@ -135,14 +152,18 @@ def utc_now():
 # HELPER - FILE EXTENSION
 # =========================================================
 
-def get_file_extension(filename):
+def get_file_extension(
+    filename
+):
 
     if not filename:
+
         return ""
 
     filename = filename.lower()
 
     if "." not in filename:
+
         return ""
 
     return filename.rsplit(
@@ -165,7 +186,8 @@ def allowed_file(
     )
 
     return (
-        extension in
+        extension
+        in
         allowed_extensions
     )
 
@@ -174,9 +196,16 @@ def allowed_file(
 # HELPER - EXTRACT PDF TEXT
 # =========================================================
 
-def extract_pdf_text(file_path):
+def extract_pdf_text(
+    file_path
+):
 
     if not PDF_AVAILABLE:
+
+        print(
+            "pypdf is not installed."
+        )
+
         return ""
 
     try:
@@ -215,9 +244,16 @@ def extract_pdf_text(file_path):
 # HELPER - EXTRACT DOCX TEXT
 # =========================================================
 
-def extract_docx_text(file_path):
+def extract_docx_text(
+    file_path
+):
 
     if not DOCX_AVAILABLE:
+
+        print(
+            "python-docx is not installed."
+        )
+
         return ""
 
     try:
@@ -228,8 +264,9 @@ def extract_docx_text(file_path):
 
         extracted_text = []
 
+
         # -------------------------------------------------
-        # Paragraphs
+        # PARAGRAPHS
         # -------------------------------------------------
 
         for paragraph in document.paragraphs:
@@ -242,8 +279,9 @@ def extract_docx_text(file_path):
                     text
                 )
 
+
         # -------------------------------------------------
-        # Tables
+        # TABLES
         # -------------------------------------------------
 
         for table in document.tables:
@@ -269,6 +307,7 @@ def extract_docx_text(file_path):
                             row_text
                         )
                     )
+
 
         return "\n".join(
             extracted_text
@@ -323,14 +362,23 @@ def save_uploaded_file(
 ):
 
     if not uploaded_file:
+
         return None
+
 
     original_filename = (
         uploaded_file.filename
     )
 
+
     if not original_filename:
+
         return None
+
+
+    # -----------------------------------------------------
+    # CHECK FILE TYPE
+    # -----------------------------------------------------
 
     if not allowed_file(
         original_filename,
@@ -342,13 +390,15 @@ def save_uploaded_file(
             "Only PDF and DOCX files are supported."
         )
 
+
     # -----------------------------------------------------
-    # Secure filename
+    # SECURE FILENAME
     # -----------------------------------------------------
 
     safe_filename = secure_filename(
         original_filename
     )
+
 
     if not safe_filename:
 
@@ -356,8 +406,9 @@ def save_uploaded_file(
             "Invalid filename"
         )
 
+
     # -----------------------------------------------------
-    # Create unique filename
+    # CREATE UNIQUE FILENAME
     # -----------------------------------------------------
 
     unique_filename = (
@@ -366,26 +417,30 @@ def save_uploaded_file(
         + safe_filename
     )
 
+
     file_path = os.path.join(
         folder,
         unique_filename
     )
 
+
     # -----------------------------------------------------
-    # Save file
+    # SAVE FILE
     # -----------------------------------------------------
 
     uploaded_file.save(
         file_path
     )
 
+
     # -----------------------------------------------------
-    # Check file size
+    # CHECK FILE SIZE
     # -----------------------------------------------------
 
     file_size = os.path.getsize(
         file_path
     )
+
 
     if file_size > MAX_FILE_SIZE:
 
@@ -403,8 +458,9 @@ def save_uploaded_file(
             "File size exceeds 10 MB"
         )
 
+
     # -----------------------------------------------------
-    # Extract text
+    # EXTRACT TEXT
     # -----------------------------------------------------
 
     extracted_text = (
@@ -413,6 +469,7 @@ def save_uploaded_file(
             original_filename
         )
     )
+
 
     return {
 
@@ -438,6 +495,7 @@ def save_uploaded_file(
 
         "uploaded_at":
             utc_now()
+
     }
 
 
@@ -445,7 +503,9 @@ def save_uploaded_file(
 # JWT TOKEN VERIFICATION
 # =========================================================
 
-def token_required(function):
+def token_required(
+    function
+):
 
     @wraps(function)
     def decorated(
@@ -456,6 +516,11 @@ def token_required(function):
         auth_header = request.headers.get(
             "Authorization"
         )
+
+
+        # -------------------------------------------------
+        # TOKEN MISSING
+        # -------------------------------------------------
 
         if not auth_header:
 
@@ -468,6 +533,11 @@ def token_required(function):
 
             }), 401
 
+
+        # -------------------------------------------------
+        # INVALID FORMAT
+        # -------------------------------------------------
+
         if not auth_header.startswith(
             "Bearer "
         ):
@@ -477,26 +547,53 @@ def token_required(function):
                 "success": False,
 
                 "message":
-                    "Invalid authorization format"
+                    "Invalid authorization format. "
+                    "Use: Bearer <token>"
 
             }), 401
+
 
         token = auth_header.split(
             " ",
             1
-        )[1]
+        )[1].strip()
+
+
+        if not token:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Authorization token is empty"
+
+            }), 401
+
+
+        # -------------------------------------------------
+        # DECODE TOKEN
+        # -------------------------------------------------
 
         try:
 
             payload = jwt.decode(
+
                 token,
+
                 JWT_SECRET_KEY,
-                algorithms=["HS256"]
+
+                algorithms=[
+                    "HS256"
+                ]
+
             )
+
 
             student_id = payload.get(
                 "student_id"
             )
+
 
             if not student_id:
 
@@ -505,9 +602,10 @@ def token_required(function):
                     "success": False,
 
                     "message":
-                        "Invalid token"
+                        "Invalid token: student ID missing"
 
                 }), 401
+
 
         except jwt.ExpiredSignatureError:
 
@@ -516,9 +614,10 @@ def token_required(function):
                 "success": False,
 
                 "message":
-                    "Token has expired"
+                    "Token has expired. Please login again."
 
             }), 401
+
 
         except jwt.InvalidTokenError:
 
@@ -531,11 +630,17 @@ def token_required(function):
 
             }), 401
 
+
+        # -------------------------------------------------
+        # CALL PROTECTED FUNCTION
+        # -------------------------------------------------
+
         return function(
             student_id,
             *args,
             **kwargs
         )
+
 
     return decorated
 
@@ -556,8 +661,9 @@ def register_student():
 
     data = None
 
+
     # -----------------------------------------------------
-    # JSON
+    # JSON REQUEST
     # -----------------------------------------------------
 
     if request.is_json:
@@ -566,8 +672,9 @@ def register_student():
             silent=True
         )
 
+
     # -----------------------------------------------------
-    # MULTIPART FORM
+    # MULTIPART FORM REQUEST
     # -----------------------------------------------------
 
     else:
@@ -575,6 +682,7 @@ def register_student():
         student_data = request.form.get(
             "student_data"
         )
+
 
         if student_data:
 
@@ -594,6 +702,11 @@ def register_student():
                         "Invalid student_data JSON"
 
                 }), 400
+
+
+    # -----------------------------------------------------
+    # VALIDATE DATA
+    # -----------------------------------------------------
 
     if not data:
 
@@ -623,7 +736,9 @@ def register_student():
         "========================================"
     )
 
-    print(data)
+    print(
+        data
+    )
 
     print(
         "========================================\n"
@@ -645,6 +760,7 @@ def register_student():
         "password"
 
     ]
+
 
     for field in required_fields:
 
@@ -787,6 +903,7 @@ def register_student():
         "RESUME_FOLDER"
     )
 
+
     certificate_folder = current_app.config.get(
         "CERTIFICATE_FOLDER"
     )
@@ -798,9 +915,11 @@ def register_student():
 
     uploaded_resume = None
 
+
     resume_file = request.files.get(
         "resume"
     )
+
 
     if resume_file:
 
@@ -815,6 +934,7 @@ def register_student():
 
             }), 500
 
+
         try:
 
             uploaded_resume = (
@@ -828,6 +948,7 @@ def register_student():
 
                 )
             )
+
 
         except ValueError as error:
 
@@ -847,11 +968,13 @@ def register_student():
 
     uploaded_certificates = []
 
+
     certificate_files = (
         request.files.getlist(
             "certificates"
         )
     )
+
 
     if certificate_files:
 
@@ -866,11 +989,13 @@ def register_student():
 
             }), 500
 
+
         for certificate_file in certificate_files:
 
             if not certificate_file.filename:
 
                 continue
+
 
             try:
 
@@ -886,11 +1011,13 @@ def register_student():
                     )
                 )
 
+
                 if certificate_info:
 
                     uploaded_certificates.append(
                         certificate_info
                     )
+
 
             except ValueError as error:
 
@@ -905,10 +1032,11 @@ def register_student():
 
 
     # =====================================================
-    # DOCUMENT TEXT
+    # EXTRACT RESUME TEXT
     # =====================================================
 
     resume_extracted_text = ""
+
 
     if uploaded_resume:
 
@@ -921,7 +1049,12 @@ def register_student():
         )
 
 
+    # =====================================================
+    # EXTRACT CERTIFICATE TEXT
+    # =====================================================
+
     certificate_extracted_texts = []
+
 
     for certificate in uploaded_certificates:
 
@@ -932,6 +1065,7 @@ def register_student():
             )
             or ""
         )
+
 
         if extracted_text:
 
@@ -958,12 +1092,14 @@ def register_student():
             )
         )
 
+
     except Exception as error:
 
         print(
             "Skill extraction error:",
             error
         )
+
 
         detected_skills = {
 
@@ -983,7 +1119,7 @@ def register_student():
 
 
     # =====================================================
-    # DEBUG SKILLS
+    # DEBUG DETECTED SKILLS
     # =====================================================
 
     print(
@@ -1013,6 +1149,7 @@ def register_student():
 
     final_certifications = []
 
+
     for index, certification in enumerate(
         certifications_data
     ):
@@ -1024,9 +1161,11 @@ def register_student():
 
             continue
 
+
         certification_copy = dict(
             certification
         )
+
 
         if index < len(
             uploaded_certificates
@@ -1038,8 +1177,64 @@ def register_student():
                 index
             ]
 
+
         final_certifications.append(
             certification_copy
+        )
+
+
+    # =====================================================
+    # STANDARDIZED CERTIFICATES
+    # =====================================================
+
+    standardized_certificates = []
+
+
+    for certificate in uploaded_certificates:
+
+        standardized_certificate = {
+
+            "original_name":
+                certificate.get(
+                    "original_filename"
+                ),
+
+            "stored_filename":
+                certificate.get(
+                    "stored_filename"
+                ),
+
+            "file_path":
+                certificate.get(
+                    "file_path"
+                ),
+
+            "file_type":
+                certificate.get(
+                    "file_type"
+                ),
+
+            "file_size":
+                certificate.get(
+                    "file_size"
+                ),
+
+            "extracted_text":
+                certificate.get(
+                    "extracted_text",
+                    ""
+                ),
+
+            "uploaded_at":
+                certificate.get(
+                    "uploaded_at"
+                )
+
+        }
+
+
+        standardized_certificates.append(
+            standardized_certificate
         )
 
 
@@ -1050,14 +1245,26 @@ def register_student():
     final_resume = {
 
         "has_resume":
-            resume_data.get(
-                "has_resume"
-            ),
+            uploaded_resume is not None,
 
-        "resume_name":
+        "resume_name": (
+
+            uploaded_resume.get(
+                "original_filename"
+            )
+
+            if uploaded_resume
+
+            else
+
             resume_data.get(
                 "resume_name"
-            ),
+            )
+
+        ),
+
+        "extracted_text":
+            resume_extracted_text,
 
         "file":
             uploaded_resume
@@ -1200,7 +1407,7 @@ def register_student():
 
 
         # =================================================
-        # MANUALLY ENTERED SKILLS
+        # MANUAL SKILLS
         # =================================================
 
         "skills":
@@ -1208,7 +1415,7 @@ def register_student():
 
 
         # =================================================
-        # AUTOMATICALLY DETECTED SKILLS
+        # DETECTED SKILLS
         # =================================================
 
         "detected_skills": {
@@ -1258,6 +1465,14 @@ def register_student():
 
         "certifications":
             final_certifications,
+
+
+        # =================================================
+        # UPLOADED CERTIFICATES
+        # =================================================
+
+        "uploaded_certificates":
+            standardized_certificates,
 
 
         # =================================================
@@ -1355,6 +1570,9 @@ def register_student():
         "job_recommendations":
             [],
 
+        "job_recommendations_updated_at":
+            None,
+
 
         # =================================================
         # PASSWORD
@@ -1377,7 +1595,7 @@ def register_student():
 
 
     # =====================================================
-    # SAVE STUDENT TO MONGODB
+    # SAVE STUDENT
     # =====================================================
 
     try:
@@ -1388,6 +1606,7 @@ def register_student():
             )
         )
 
+
     except Exception as error:
 
         print(
@@ -1395,12 +1614,16 @@ def register_student():
             error
         )
 
+
         return jsonify({
 
             "success": False,
 
             "message":
-                "Failed to save student"
+                "Failed to save student",
+
+            "error":
+                str(error)
 
         }), 500
 
@@ -1424,10 +1647,12 @@ def register_student():
             student_id
         )
 
+
         print(
             "Background LLM analysis "
             "started successfully."
         )
+
 
     except Exception as error:
 
@@ -1436,6 +1661,7 @@ def register_student():
             "LLM analysis:",
             error
         )
+
 
         students_collection.update_one(
 
@@ -1457,14 +1683,12 @@ def register_student():
                         utc_now()
 
                 }
-
             }
-
         )
 
 
     # =====================================================
-    # REGISTRATION SUCCESS
+    # SUCCESS RESPONSE
     # =====================================================
 
     return jsonify({
@@ -1491,40 +1715,33 @@ def register_student():
         "resume_text_extracted":
             bool(
                 uploaded_resume
-                and uploaded_resume.get(
+                and
+                uploaded_resume.get(
                     "extracted_text"
                 )
             ),
 
         "certificate_texts_extracted":
             sum(
-
                 1
-
                 for certificate
                 in uploaded_certificates
-
                 if certificate.get(
                     "extracted_text"
                 )
-
             ),
 
         "skills_detected":
             len(
-
                 detected_skills.get(
                     "skills",
                     []
                 )
-
                 if isinstance(
                     detected_skills,
                     dict
                 )
-
                 else []
-
             )
 
     }), 201
@@ -1544,6 +1761,7 @@ def login_student():
         silent=True
     )
 
+
     if not data:
 
         return jsonify({
@@ -1559,6 +1777,7 @@ def login_student():
     email = data.get(
         "email"
     )
+
 
     password = data.get(
         "password"
@@ -1576,6 +1795,10 @@ def login_student():
 
         }), 400
 
+
+    # =====================================================
+    # FIND STUDENT
+    # =====================================================
 
     student = (
         students_collection.find_one({
@@ -1598,6 +1821,10 @@ def login_student():
 
         }), 401
 
+
+    # =====================================================
+    # CHECK PASSWORD
+    # =====================================================
 
     stored_password = student.get(
         "password"
@@ -1642,6 +1869,10 @@ def login_student():
         }), 401
 
 
+    # =====================================================
+    # CREATE JWT TOKEN
+    # =====================================================
+
     payload = {
 
         "student_id":
@@ -1650,7 +1881,11 @@ def login_student():
             ),
 
         "email":
-            student["personal"]["email"],
+            student[
+                "personal"
+            ][
+                "email"
+            ],
 
         "exp":
             utc_now()
@@ -1673,6 +1908,10 @@ def login_student():
     )
 
 
+    # =====================================================
+    # LOGIN RESPONSE
+    # =====================================================
+
     return jsonify({
 
         "success": True,
@@ -1691,17 +1930,23 @@ def login_student():
                 ),
 
             "full_name":
-                student["personal"][
+                student[
+                    "personal"
+                ][
                     "full_name"
                 ],
 
             "email":
-                student["personal"][
+                student[
+                    "personal"
+                ][
                     "email"
                 ],
 
             "register_number":
-                student["personal"][
+                student[
+                    "personal"
+                ][
                     "register_number"
                 ]
 
@@ -1764,13 +2009,14 @@ def get_student_profile(
 
 
     # -----------------------------------------------------
-    # Never return password
+    # NEVER RETURN PASSWORD
     # -----------------------------------------------------
 
     student.pop(
         "password",
         None
     )
+
 
     student["_id"] = str(
         student["_id"]
@@ -1788,7 +2034,7 @@ def get_student_profile(
 
 
 # =========================================================
-# GET LLM ANALYSIS STATUS / RESULT
+# GET LLM ANALYSIS
 # =========================================================
 
 @student_routes.route(
@@ -1863,6 +2109,356 @@ def get_student_analysis(
 
 
 # =========================================================
+# GET JOB RECOMMENDATIONS
+#
+# BOTH URLs ARE SUPPORTED:
+#
+# /api/students/recommendations
+#
+# /api/students/job-recommendations
+#
+# =========================================================
+
+@student_routes.route(
+    "/recommendations",
+    methods=["GET"]
+)
+@student_routes.route(
+    "/job-recommendations",
+    methods=["GET"]
+)
+@token_required
+def get_job_recommendations(
+    student_id
+):
+
+    try:
+
+        # =================================================
+        # CONVERT STUDENT ID
+        # =================================================
+
+        object_id = ObjectId(
+            student_id
+        )
+
+
+        # =================================================
+        # GET STUDENT
+        # =================================================
+
+        student = (
+            students_collection.find_one({
+
+                "_id":
+                    object_id
+
+            })
+        )
+
+
+        if not student:
+
+            return jsonify({
+
+                "success": False,
+
+                "message":
+                    "Student not found"
+
+            }), 404
+
+
+        # =================================================
+        # GET LIMIT
+        # =================================================
+
+        limit = request.args.get(
+            "limit",
+            10
+        )
+
+
+        try:
+
+            limit = int(
+                limit
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            limit = 10
+
+
+        # -------------------------------------------------
+        # KEEP LIMIT BETWEEN 1 AND 50
+        # -------------------------------------------------
+
+        limit = max(
+            1,
+            min(
+                limit,
+                50
+            )
+        )
+
+
+        # =================================================
+        # GET ALL JOBS
+        # =================================================
+
+        jobs = list(
+            jobs_collection.find({})
+        )
+
+
+        # =================================================
+        # NO JOBS
+        # =================================================
+
+        if not jobs:
+
+            return jsonify({
+
+                "success": True,
+
+                "message":
+                    "No jobs available for matching",
+
+                "count":
+                    0,
+
+                "recommendations":
+                    []
+
+            }), 200
+
+
+        # =================================================
+        # RUN JOB MATCHER
+        # =================================================
+
+        recommendations = recommend_jobs(
+
+            student,
+
+            jobs,
+
+            limit=limit
+
+        )
+
+
+        # =================================================
+        # SAVE RECOMMENDATIONS
+        # =================================================
+
+        try:
+
+            students_collection.update_one(
+
+                {
+                    "_id":
+                        object_id
+                },
+
+                {
+                    "$set": {
+
+                        "job_recommendations":
+                            recommendations,
+
+                        "job_recommendations_updated_at":
+                            utc_now()
+
+                    }
+                }
+
+            )
+
+        except Exception as save_error:
+
+            print(
+                "Could not save job recommendations:",
+                save_error
+            )
+
+
+        # =================================================
+        # RESPONSE
+        # =================================================
+
+        return jsonify({
+
+            "success": True,
+
+            "message":
+                "Job recommendations generated successfully",
+
+            "student_id":
+                student_id,
+
+            "total_jobs_checked":
+                len(jobs),
+
+            "count":
+                len(
+                    recommendations
+                ),
+
+            "recommendations":
+                recommendations
+
+        }), 200
+
+
+    # =====================================================
+    # INVALID OBJECT ID
+    # =====================================================
+
+    except InvalidId:
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Invalid student ID"
+
+        }), 400
+
+
+    # =====================================================
+    # GENERAL ERROR
+    # =====================================================
+
+    except Exception as error:
+
+        print(
+            "\n========================================"
+        )
+
+        print(
+            "JOB RECOMMENDATION ERROR"
+        )
+
+        print(
+            "========================================"
+        )
+
+        print(
+            error
+        )
+
+        print(
+            "========================================\n"
+        )
+
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Failed to generate job recommendations",
+
+            "error":
+                str(error)
+
+        }), 500
+
+
+# =========================================================
+# GET SAVED JOB RECOMMENDATIONS
+# =========================================================
+
+@student_routes.route(
+    "/saved-recommendations",
+    methods=["GET"]
+)
+@token_required
+def get_saved_job_recommendations(
+    student_id
+):
+
+    try:
+
+        object_id = ObjectId(
+            student_id
+        )
+
+
+    except InvalidId:
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Invalid student ID"
+
+        }), 400
+
+
+    student = (
+        students_collection.find_one(
+
+            {
+                "_id":
+                    object_id
+            },
+
+            {
+                "job_recommendations": 1,
+                "job_recommendations_updated_at": 1
+            }
+
+        )
+    )
+
+
+    if not student:
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Student not found"
+
+        }), 404
+
+
+    recommendations = student.get(
+        "job_recommendations",
+        []
+    )
+
+
+    return jsonify({
+
+        "success": True,
+
+        "count":
+            len(
+                recommendations
+            ),
+
+        "updated_at":
+            student.get(
+                "job_recommendations_updated_at"
+            ),
+
+        "recommendations":
+            recommendations
+
+    }), 200
+
+
+# =========================================================
 # UPDATE STUDENT PROFILE
 # =========================================================
 
@@ -1879,6 +2475,7 @@ def update_student_profile(
         silent=True
     )
 
+
     if not data:
 
         return jsonify({
@@ -1890,6 +2487,10 @@ def update_student_profile(
 
         }), 400
 
+
+    # =====================================================
+    # OBJECT ID
+    # =====================================================
 
     try:
 
@@ -1908,6 +2509,10 @@ def update_student_profile(
 
         }), 400
 
+
+    # =====================================================
+    # CHECK STUDENT
+    # =====================================================
 
     student = (
         students_collection.find_one({
@@ -1947,6 +2552,8 @@ def update_student_profile(
 
         "certifications",
 
+        "uploaded_certificates",
+
         "resume",
 
         "projects",
@@ -1963,10 +2570,16 @@ def update_student_profile(
 
         if field in data:
 
-            update_data[field] = data[
+            update_data[
+                field
+            ] = data[
                 field
             ]
 
+
+    # =====================================================
+    # VALIDATE UPDATE
+    # =====================================================
 
     if not update_data:
 
@@ -1980,31 +2593,93 @@ def update_student_profile(
         }), 400
 
 
+    # =====================================================
+    # UPDATE DATE
+    # =====================================================
+
     update_data[
         "updated_at"
     ] = utc_now()
 
 
-    students_collection.update_one(
+    # =====================================================
+    # CLEAR OLD RECOMMENDATIONS
+    #
+    # Because changing skills / academic data /
+    # career preferences can change the ranking.
+    # =====================================================
 
-        {
-            "_id":
-                object_id
-        },
+    update_data[
+        "job_recommendations"
+    ] = []
 
-        {
-            "$set":
-                update_data
-        }
 
-    )
+    update_data[
+        "job_recommendations_updated_at"
+    ] = None
 
+
+    # =====================================================
+    # UPDATE MONGODB
+    # =====================================================
+
+    try:
+
+        result = students_collection.update_one(
+
+            {
+                "_id":
+                    object_id
+            },
+
+            {
+                "$set":
+                    update_data
+            }
+
+        )
+
+
+    except Exception as error:
+
+        print(
+            "Profile update error:",
+            error
+        )
+
+
+        return jsonify({
+
+            "success": False,
+
+            "message":
+                "Failed to update student profile",
+
+            "error":
+                str(error)
+
+        }), 500
+
+
+    # =====================================================
+    # RESPONSE
+    # =====================================================
 
     return jsonify({
 
         "success": True,
 
         "message":
-            "Student profile updated successfully"
+            "Student profile updated successfully",
+
+        "modified":
+            result.modified_count > 0,
+
+        "recommendations_reset":
+            True,
+
+        "message_next_step":
+            "Call /api/students/job-recommendations "
+            "to generate updated recommendations."
 
     }), 200

@@ -1,6 +1,11 @@
+# ============================================================
+# services/skill_extractor.py
+# ============================================================
+
 """
 Skill Extractor
 ---------------
+
 Extracts technical and professional skills from:
 
 - Resume text
@@ -8,9 +13,23 @@ Extracts technical and professional skills from:
 - Project descriptions
 - Student-entered information
 
-Uses a rule-based approach that can later be connected
-to an LLM for deeper skill-gap analysis and recommendations.
+Features:
+
+- Rule-based skill detection
+- OCR-safe matching
+- Resume skill extraction
+- Certificate skill extraction
+- Categorized skills
+- Detailed skill information
+- Duplicate removal
+
+This service can later be combined with an LLM for:
+
+- Skill-gap analysis
+- Job matching
+- Career recommendations
 """
+
 
 import re
 
@@ -21,164 +40,358 @@ import re
 
 SKILL_DATABASE = {
 
+    # ========================================================
+    # PROGRAMMING
+    # ========================================================
+
     "Programming": [
+
         "C++",
+
         "Java",
+
         "Python",
+
         "JavaScript",
+
         "TypeScript",
+
         "SQL",
+
         "CUDA",
+
         "Go",
+
         "Rust",
+
         "PHP",
+
         "Kotlin",
+
         "Swift",
+
         "R",
-        "C",
+
+        "C"
+
     ],
+
+
+    # ========================================================
+    # WEB DEVELOPMENT
+    # ========================================================
 
     "Web Development": [
+
         "HTML",
+
         "CSS",
+
         "React",
+
         "Angular",
+
         "Vue",
+
         "Node.js",
+
         "Express.js",
+
         "Django",
+
         "Flask",
+
         "Spring Boot",
+
         "Spring",
+
         "REST API",
-        "REST APIs",
+
+        "REST APIs"
+
     ],
+
+
+    # ========================================================
+    # DATABASES
+    # ========================================================
 
     "Databases": [
+
         "MySQL",
+
         "PostgreSQL",
+
         "MongoDB",
+
         "Oracle",
+
         "SQLite",
+
         "Redis",
-        "Firebase",
+
+        "Firebase"
+
     ],
+
+
+    # ========================================================
+    # CLOUD
+    # ========================================================
 
     "Cloud": [
+
         "AWS",
+
         "Amazon Web Services",
+
         "Azure",
+
         "Microsoft Azure",
+
         "Google Cloud",
-        "GCP",
+
+        "GCP"
+
     ],
+
+
+    # ========================================================
+    # DATA SCIENCE
+    # ========================================================
 
     "Data Science": [
+
         "Pandas",
+
         "NumPy",
+
         "Matplotlib",
+
         "Seaborn",
+
         "Scikit-learn",
-        "scikit-learn",
+
         "Jupyter",
-        "Jupyter Notebook",
+
+        "Jupyter Notebook"
+
     ],
+
+
+    # ========================================================
+    # ARTIFICIAL INTELLIGENCE
+    # ========================================================
 
     "Artificial Intelligence": [
+
         "Artificial Intelligence",
+
         "Machine Learning",
+
         "Deep Learning",
+
         "Natural Language Processing",
+
         "NLP",
+
         "Computer Vision",
+
         "Generative AI",
+
         "LLM",
+
         "Large Language Models",
-        "Transformers",
+
+        "Transformers"
+
     ],
+
+
+    # ========================================================
+    # MACHINE LEARNING
+    # ========================================================
 
     "Machine Learning": [
+
         "TensorFlow",
+
         "PyTorch",
+
         "Keras",
+
         "XGBoost",
-        "LightGBM",
-        "Machine Learning",
-        "Deep Learning",
+
+        "LightGBM"
+
     ],
+
+
+    # ========================================================
+    # CYBERSECURITY
+    # ========================================================
 
     "Cybersecurity": [
+
         "Cybersecurity",
+
         "Cyber Security",
+
         "Network Security",
+
         "Ethical Hacking",
+
         "Penetration Testing",
+
         "Cryptography",
-        "OWASP",
+
+        "OWASP"
+
     ],
+
+
+    # ========================================================
+    # DEVOPS
+    # ========================================================
 
     "DevOps": [
+
         "Git",
+
         "GitHub",
+
         "GitLab",
+
         "Jenkins",
+
         "Docker",
+
         "Kubernetes",
+
         "CI/CD",
+
         "Continuous Integration",
-        "Continuous Deployment",
+
+        "Continuous Deployment"
+
     ],
+
+
+    # ========================================================
+    # OPERATING SYSTEMS
+    # ========================================================
 
     "Operating Systems": [
+
         "Windows",
+
         "Linux",
+
         "Ubuntu",
+
         "Unix",
-        "macOS",
+
+        "macOS"
+
     ],
+
+
+    # ========================================================
+    # NETWORKING
+    # ========================================================
 
     "Networking": [
+
         "Computer Networks",
+
         "TCP/IP",
+
         "TCP",
+
         "UDP",
+
         "HTTP",
+
         "HTTPS",
+
         "DNS",
+
         "OSI",
-        "Networking",
+
+        "Networking"
+
     ],
+
+
+    # ========================================================
+    # TOOLS
+    # ========================================================
 
     "Tools": [
+
         "Git",
+
         "GitHub",
+
         "GitLab",
+
         "VS Code",
+
         "Visual Studio Code",
+
         "Figma",
+
         "Postman",
+
         "Jira",
-        "Android Studio",
+
+        "Android Studio"
+
     ],
+
+
+    # ========================================================
+    # MOBILE DEVELOPMENT
+    # ========================================================
 
     "Mobile Development": [
+
         "Android",
+
         "Android Development",
+
         "Flutter",
+
         "React Native",
+
         "Kotlin",
-        "Swift",
+
+        "Swift"
+
     ],
 
+
+    # ========================================================
+    # GPU COMPUTING
+    # ========================================================
+
     "GPU Computing": [
+
         "CUDA",
+
         "CUDA C",
+
         "CUDA Python",
+
         "GPU Computing",
+
         "GPU Programming",
+
         "OpenCL",
-        "CuPy",
-    ],
+
+        "CuPy"
+
+    ]
 
 }
 
@@ -187,39 +400,78 @@ SKILL_DATABASE = {
 # OCR NORMALIZATION
 # ============================================================
 
-def normalize_text(text):
+def normalize_text(
+    text
+):
+
     """
     Normalize OCR/document text.
-
-    Handles:
-    - New lines
-    - Tabs
-    - Multiple spaces
-    - Common OCR formatting issues
     """
 
     if not text:
+
         return ""
 
-    text = str(text)
 
-    # Normalize line breaks
-    text = text.replace("\n", " ")
-    text = text.replace("\r", " ")
-    text = text.replace("\t", " ")
-
-    # Common OCR substitutions
-    text = text.replace("‐", "-")
-    text = text.replace("-", "-")
-    text = text.replace("–", "-")
-    text = text.replace("—", "-")
-
-    # Multiple spaces
-    text = re.sub(
-        r"\s+",
-        " ",
+    text = str(
         text
     )
+
+
+    # ========================================================
+    # NORMALIZE LINE BREAKS
+    # ========================================================
+
+    text = text.replace(
+        "\n",
+        " "
+    )
+
+    text = text.replace(
+        "\r",
+        " "
+    )
+
+    text = text.replace(
+        "\t",
+        " "
+    )
+
+
+    # ========================================================
+    # NORMALIZE DASHES
+    # ========================================================
+
+    text = text.replace(
+        "‐",
+        "-"
+    )
+
+    text = text.replace(
+        "–",
+        "-"
+    )
+
+    text = text.replace(
+        "—",
+        "-"
+    )
+
+
+    # ========================================================
+    # REMOVE EXTRA SPACES
+    # ========================================================
+
+    text = re.sub(
+
+        r"\s+",
+
+        " ",
+
+        text
+
+    )
+
 
     return text.strip()
 
@@ -228,21 +480,34 @@ def normalize_text(text):
 # NORMALIZE SKILL NAME
 # ============================================================
 
-def normalize_skill_name(skill):
+def normalize_skill_name(
+    skill
+):
+
     """
-    Normalize skill name for comparison.
+    Normalize skill name.
     """
 
     if not skill:
+
         return ""
 
-    skill = str(skill).strip()
+
+    skill = str(
+        skill
+    ).strip()
+
 
     skill = re.sub(
+
         r"\s+",
+
         " ",
+
         skill
+
     )
+
 
     return skill
 
@@ -250,115 +515,168 @@ def normalize_skill_name(skill):
 # ============================================================
 # SKILL MATCHING
 # ============================================================
-def skill_exists(text, skill):
+
+def skill_exists(
+    text,
+    skill
+):
+
+    """
+    Check whether a skill exists
+    using safe word boundaries.
+    """
 
     if not text or not skill:
+
         return False
+
 
     normalized_text = normalize_text(
         text
     ).lower()
 
+
     normalized_skill = normalize_skill_name(
         skill
     ).lower()
+
 
     escaped_skill = re.escape(
         normalized_skill
     )
 
+
+    # ========================================================
+    # SAFE WORD BOUNDARIES
+    #
+    # Prevent:
+    #
+    # R -> matching random letters
+    # C -> matching every C
+    # Go -> matching Goal
+    # ========================================================
+
     pattern = (
+
         rf"(?<!\w)"
+
         rf"{escaped_skill}"
+
         rf"(?!\w)"
+
     )
 
-    return re.search(
-        pattern,
-        normalized_text,
-        flags=re.IGNORECASE
-    ) is not None
+
+    return (
+
+        re.search(
+
+            pattern,
+
+            normalized_text,
+
+            flags=re.IGNORECASE
+
+        )
+
+        is not None
+
+    )
+
+
 # ============================================================
-# SPECIAL OCR SKILL MATCHING
+# OCR SAFE SKILL MATCHING
 # ============================================================
 
-def skill_exists_ocr_safe(text, skill):
+def skill_exists_ocr_safe(
+    text,
+    skill
+):
+
     """
-    Safely check whether a skill exists in document text.
-
-    Uses regex boundaries instead of simple substring matching
-    to avoid false detections such as:
-
-    - "R" matching every letter r
-    - "C" matching every letter c
-    - "Go" matching words like "goal"
+    Safely check whether a skill
+    exists in OCR/document text.
     """
 
     if not text or not skill:
+
         return False
 
-    normalized_text = normalize_text(text)
+
+    normalized_text = normalize_text(
+        text
+    )
+
 
     normalized_skill = normalize_skill_name(
         skill
     )
 
+
     return skill_exists(
+
         normalized_text,
+
         normalized_skill
+
     )
+
 
 # ============================================================
 # EXTRACT SKILLS BY CATEGORY
 # ============================================================
 
-def extract_skills_by_category(text):
+def extract_skills_by_category(
+    text
+):
+
     """
-    Extract skills and organize them by category.
-
-    Example:
-
-    {
-        "Programming": [
-            "Python",
-            "Java"
-        ],
-        "Databases": [
-            "MongoDB"
-        ]
-    }
+    Extract skills organized by category.
     """
 
     text = normalize_text(
         text
     )
 
+
     result = {}
 
+
     if not text:
+
         return result
 
-    for category, skills in SKILL_DATABASE.items():
+
+    for category, skills in (
+        SKILL_DATABASE.items()
+    ):
 
         detected = []
+
 
         for skill in skills:
 
             if skill_exists_ocr_safe(
+
                 text,
+
                 skill
+
             ):
 
-                # Prevent duplicate skill names
                 if skill not in detected:
 
                     detected.append(
                         skill
                     )
 
+
         if detected:
 
-            result[category] = detected
+            result[
+                category
+            ] = detected
+
 
     return result
 
@@ -367,9 +685,12 @@ def extract_skills_by_category(text):
 # EXTRACT ALL SKILLS
 # ============================================================
 
-def extract_skills(text):
+def extract_skills(
+    text
+):
+
     """
-    Return all detected skills as a list.
+    Extract all unique skills.
     """
 
     categorized = (
@@ -378,7 +699,9 @@ def extract_skills(text):
         )
     )
 
+
     skills = []
+
 
     for category_skills in (
         categorized.values()
@@ -392,16 +715,21 @@ def extract_skills(text):
                     skill
                 )
 
+
     return skills
 
 
 # ============================================================
-# EXTRACT SKILLS WITH DETAILS
+# EXTRACT SKILL DETAILS
 # ============================================================
 
-def extract_skill_details(text):
+def extract_skill_details(
+    text,
+    source="document"
+):
+
     """
-    Return detailed skill information.
+    Extract detailed skill information.
     """
 
     categorized = (
@@ -410,7 +738,9 @@ def extract_skill_details(text):
         )
     )
 
+
     results = []
+
 
     for category, skills in (
         categorized.items()
@@ -430,49 +760,68 @@ def extract_skill_details(text):
                     "Detected",
 
                 "source":
-                    "document"
+                    source
 
             })
+
 
     return results
 
 
 # ============================================================
-# MERGE MANUAL + EXTRACTED SKILLS
+# MERGE SKILLS
 # ============================================================
 
 def merge_skills(
+
     manual_skills=None,
+
     extracted_skills=None
+
 ):
+
     """
-    Merge manually entered skills with
-    automatically extracted skills.
+    Merge manually entered skills
+    with automatically extracted skills.
     """
 
+
     manual_skills = (
+
         manual_skills
+
         if isinstance(
             manual_skills,
             list
         )
+
         else []
+
     )
 
+
     extracted_skills = (
+
         extracted_skills
+
         if isinstance(
             extracted_skills,
             list
         )
+
         else []
+
     )
+
 
     merged = []
 
-    # --------------------------------------------------------
+    existing_names = set()
+
+
+    # ========================================================
     # MANUAL SKILLS
-    # --------------------------------------------------------
+    # ========================================================
 
     for skill in manual_skills:
 
@@ -494,7 +843,9 @@ def merge_skills(
 
                 "source":
                     "manual"
+
             }
+
 
         elif isinstance(
             skill,
@@ -523,32 +874,55 @@ def merge_skills(
 
                 "source":
                     "manual"
+
             }
+
 
         else:
 
             continue
 
-        if not skill_data["name"]:
+
+        skill_name = normalize_skill_name(
+
+            skill_data.get(
+                "name"
+            )
+
+        )
+
+
+        if not skill_name:
 
             continue
+
+
+        skill_key = skill_name.lower()
+
+
+        if skill_key in existing_names:
+
+            continue
+
+
+        skill_data[
+            "name"
+        ] = skill_name
+
 
         merged.append(
             skill_data
         )
 
-    # --------------------------------------------------------
+
+        existing_names.add(
+            skill_key
+        )
+
+
+    # ========================================================
     # EXTRACTED SKILLS
-    # --------------------------------------------------------
-
-    existing_names = {
-
-        item["name"].lower()
-
-        for item in merged
-
-        if item.get("name")
-    }
+    # ========================================================
 
     for skill in extracted_skills:
 
@@ -570,7 +944,9 @@ def merge_skills(
 
                 "source":
                     "document"
+
             }
+
 
         elif isinstance(
             skill,
@@ -599,30 +975,111 @@ def merge_skills(
 
                 "source":
                     "document"
+
             }
+
 
         else:
 
             continue
 
-        if not skill_data["name"]:
+
+        skill_name = normalize_skill_name(
+
+            skill_data.get(
+                "name"
+            )
+
+        )
+
+
+        if not skill_name:
 
             continue
 
-        skill_key = (
-            skill_data["name"]
-            .lower()
+
+        skill_key = skill_name.lower()
+
+
+        if skill_key in existing_names:
+
+            continue
+
+
+        skill_data[
+            "name"
+        ] = skill_name
+
+
+        merged.append(
+            skill_data
         )
 
-        if skill_key not in existing_names:
 
-            merged.append(
-                skill_data
-            )
+        existing_names.add(
+            skill_key
+        )
 
-            existing_names.add(
-                skill_key
-            )
+
+    return merged
+
+
+# ============================================================
+# MERGE CATEGORIES
+# ============================================================
+
+def merge_categories(
+    category_sources
+):
+
+    """
+    Merge categorized skill dictionaries.
+    """
+
+    merged = {}
+
+
+    for categories in category_sources:
+
+        if not isinstance(
+            categories,
+            dict
+        ):
+
+            continue
+
+
+        for category, skills in (
+            categories.items()
+        ):
+
+            if category not in merged:
+
+                merged[
+                    category
+                ] = []
+
+
+            if not isinstance(
+                skills,
+                list
+            ):
+
+                continue
+
+
+            for skill in skills:
+
+                if skill not in merged[
+                    category
+                ]:
+
+                    merged[
+                        category
+                    ].append(
+                        skill
+                    )
+
 
     return merged
 
@@ -632,111 +1089,288 @@ def merge_skills(
 # ============================================================
 
 def extract_skills_from_documents(
+
     resume_text="",
+
     certificate_texts=None
+
 ):
+
     """
-    Extract skills from resume and certificates.
+    Extract skills separately from:
+
+    - Resume
+    - Certificates
+
+    Then combine all skills.
 
     Returns:
 
     {
         "skills": [],
+        "resume_skills": [],
+        "certificate_skills": [],
         "categorized_skills": {},
         "skill_details": [],
         "document_count": 0
     }
     """
 
+
+    # ========================================================
+    # VALIDATE CERTIFICATE TEXTS
+    # ========================================================
+
     certificate_texts = (
+
         certificate_texts
+
         if isinstance(
             certificate_texts,
             list
         )
+
         else []
+
     )
 
-    documents = []
 
-    # --------------------------------------------------------
+    # ========================================================
     # RESUME
-    # --------------------------------------------------------
+    # ========================================================
 
-    if resume_text:
+    normalized_resume = normalize_text(
+        resume_text
+    )
 
-        normalized_resume = (
-            normalize_text(
-                resume_text
-            )
+
+    resume_skills = []
+
+    resume_categories = {}
+
+    resume_details = []
+
+
+    if normalized_resume:
+
+        resume_skills = extract_skills(
+            normalized_resume
         )
 
-        if normalized_resume:
 
-            documents.append(
+        resume_categories = (
+            extract_skills_by_category(
                 normalized_resume
             )
+        )
 
-    # --------------------------------------------------------
-    # CERTIFICATES
-    # --------------------------------------------------------
 
-    for certificate_text in (
-        certificate_texts
-    ):
+        resume_details = (
+            extract_skill_details(
 
-        if not certificate_text:
+                normalized_resume,
 
-            continue
+                source="resume"
 
-        normalized_certificate = (
-            normalize_text(
-                certificate_text
             )
         )
+
+
+    # ========================================================
+    # CERTIFICATES
+    # ========================================================
+
+    normalized_certificates = []
+
+
+    for certificate_text in certificate_texts:
+
+        normalized_certificate = normalize_text(
+            certificate_text
+        )
+
 
         if normalized_certificate:
 
-            documents.append(
+            normalized_certificates.append(
                 normalized_certificate
             )
 
-    # --------------------------------------------------------
-    # COMBINE DOCUMENTS
-    # --------------------------------------------------------
 
-    combined_text = " ".join(
-        documents
+    combined_certificate_text = " ".join(
+        normalized_certificates
     )
 
-    # --------------------------------------------------------
-    # EXTRACT
-    # --------------------------------------------------------
 
-    skills = extract_skills(
-        combined_text
-    )
+    certificate_skills = []
 
-    categorized_skills = (
-        extract_skills_by_category(
-            combined_text
+    certificate_categories = {}
+
+    certificate_details = []
+
+
+    if combined_certificate_text:
+
+        certificate_skills = extract_skills(
+            combined_certificate_text
         )
-    )
 
-    skill_details = (
-        extract_skill_details(
-            combined_text
+
+        certificate_categories = (
+            extract_skills_by_category(
+                combined_certificate_text
+            )
         )
+
+
+        certificate_details = (
+            extract_skill_details(
+
+                combined_certificate_text,
+
+                source="certificate"
+
+            )
+        )
+
+
+    # ========================================================
+    # COMBINE ALL SKILLS
+    # ========================================================
+
+    all_skills = []
+
+
+    for skill in (
+
+        resume_skills
+
+        +
+
+        certificate_skills
+
+    ):
+
+        if skill not in all_skills:
+
+            all_skills.append(
+                skill
+            )
+
+
+    # ========================================================
+    # COMBINE CATEGORIES
+    # ========================================================
+
+    categorized_skills = merge_categories(
+
+        [
+
+            resume_categories,
+
+            certificate_categories
+
+        ]
+
     )
 
-    # --------------------------------------------------------
-    # RESULT
-    # --------------------------------------------------------
 
-    result = {
+    # ========================================================
+    # COMBINE SKILL DETAILS
+    # ========================================================
+
+    skill_details = []
+
+    existing_skills = set()
+
+
+    for detail in (
+
+        resume_details
+
+        +
+
+        certificate_details
+
+    ):
+
+        if not isinstance(
+            detail,
+            dict
+        ):
+
+            continue
+
+
+        skill_name = normalize_skill_name(
+
+            detail.get(
+                "name",
+                ""
+            )
+
+        )
+
+
+        if not skill_name:
+
+            continue
+
+
+        skill_key = skill_name.lower()
+
+
+        if skill_key in existing_skills:
+
+            continue
+
+
+        detail[
+            "name"
+        ] = skill_name
+
+
+        skill_details.append(
+            detail
+        )
+
+
+        existing_skills.add(
+            skill_key
+        )
+
+
+    # ========================================================
+    # DOCUMENT COUNT
+    # ========================================================
+
+    document_count = 0
+
+
+    if normalized_resume:
+
+        document_count += 1
+
+
+    document_count += len(
+        normalized_certificates
+    )
+
+
+    # ========================================================
+    # FINAL RESULT
+    # ========================================================
+
+    return {
 
         "skills":
-            skills,
+            all_skills,
+
+        "resume_skills":
+            resume_skills,
+
+        "certificate_skills":
+            certificate_skills,
 
         "categorized_skills":
             categorized_skills,
@@ -745,21 +1379,21 @@ def extract_skills_from_documents(
             skill_details,
 
         "document_count":
-            len(documents)
-    }
+            document_count
 
-    return result
+    }
 
 
 # ============================================================
-# SKILL SUMMARY
+# CREATE SKILL SUMMARY
 # ============================================================
 
 def create_skill_summary(
     skills
 ):
+
     """
-    Create a summary from skill details.
+    Create skill summary grouped by category.
     """
 
     if not isinstance(
@@ -774,9 +1408,14 @@ def create_skill_summary(
 
             "categories":
                 {}
+
         }
 
+
     categories = {}
+
+    unique_skills = set()
+
 
     for skill in skills:
 
@@ -787,23 +1426,49 @@ def create_skill_summary(
 
             continue
 
+
         category = skill.get(
             "category",
             "Other"
         )
 
-        name = skill.get(
-            "name",
-            ""
+
+        name = normalize_skill_name(
+
+            skill.get(
+                "name",
+                ""
+            )
+
         )
+
 
         if not name:
+
             continue
 
-        categories.setdefault(
-            category,
-            []
+
+        skill_key = name.lower()
+
+
+        if skill_key in unique_skills:
+
+            continue
+
+
+        unique_skills.add(
+            skill_key
         )
+
+
+        categories.setdefault(
+
+            category,
+
+            []
+
+        )
+
 
         if name not in categories[
             category
@@ -815,13 +1480,17 @@ def create_skill_summary(
                 name
             )
 
+
     return {
 
         "total_skills":
-            len(skills),
+            len(
+                unique_skills
+            ),
 
         "categories":
             categories
+
     }
 
 
@@ -831,13 +1500,14 @@ def create_skill_summary(
 
 if __name__ == "__main__":
 
-    sample_text = """
+    resume_sample = """
 
     RISHI
 
-    Computer Science Engineering
+    Computer Science Engineering Student
 
     Skills:
+
     Python
     Java
     C++
@@ -851,6 +1521,7 @@ if __name__ == "__main__":
     AWS
 
     Projects:
+
     Developed a web application using
     Python, Flask, React and MongoDB.
 
@@ -859,43 +1530,183 @@ if __name__ == "__main__":
 
     """
 
-    print("\n================================")
-    print("DETECTED SKILLS")
-    print("================================")
+
+    certificate_samples = [
+
+        """
+
+        Python Programming Certificate
+
+        Successfully completed training in:
+
+        Python
+        NumPy
+        Pandas
+        Machine Learning
+
+        """
+
+    ]
+
 
     print(
+        "\n================================"
+    )
+
+    print(
+        "RESUME SKILLS"
+    )
+
+    print(
+        "================================"
+    )
+
+
+    print(
+
         extract_skills(
-            sample_text
+            resume_sample
         )
+
     )
 
-    print("\n================================")
-    print("CATEGORIZED SKILLS")
-    print("================================")
 
     print(
-        extract_skills_by_category(
-            sample_text
-        )
+        "\n================================"
     )
 
-    print("\n================================")
-    print("SKILL DETAILS")
-    print("================================")
-
     print(
-        extract_skill_details(
-            sample_text
-        )
+        "COMPLETE DOCUMENT EXTRACTION"
     )
 
-    print("\n================================")
-    print("DOCUMENT EXTRACTION")
-    print("================================")
+    print(
+        "================================"
+    )
+
+
+    result = extract_skills_from_documents(
+
+        resume_text=
+            resume_sample,
+
+        certificate_texts=
+            certificate_samples
+
+    )
+
 
     print(
-        extract_skills_from_documents(
-            resume_text=sample_text,
-            certificate_texts=[]
+
+        result
+
+    )
+
+
+    print(
+        "\n================================"
+    )
+
+    print(
+        "RESUME SKILLS"
+    )
+
+    print(
+        "================================"
+    )
+
+
+    print(
+
+        result.get(
+            "resume_skills"
         )
+
+    )
+
+
+    print(
+        "\n================================"
+    )
+
+    print(
+        "CERTIFICATE SKILLS"
+    )
+
+    print(
+        "================================"
+    )
+
+
+    print(
+
+        result.get(
+            "certificate_skills"
+        )
+
+    )
+
+
+    print(
+        "\n================================"
+    )
+
+    print(
+        "ALL SKILLS"
+    )
+
+    print(
+        "================================"
+    )
+
+
+    print(
+
+        result.get(
+            "skills"
+        )
+
+    )
+
+
+    print(
+        "\n================================"
+    )
+
+    print(
+        "CATEGORIZED SKILLS"
+    )
+
+    print(
+        "================================"
+    )
+
+
+    print(
+
+        result.get(
+            "categorized_skills"
+        )
+
+    )
+
+
+    print(
+        "\n================================"
+    )
+
+    print(
+        "DOCUMENT COUNT"
+    )
+
+    print(
+        "================================"
+    )
+
+
+    print(
+
+        result.get(
+            "document_count"
+        )
+
     )

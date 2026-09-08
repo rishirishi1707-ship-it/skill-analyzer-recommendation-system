@@ -5,7 +5,7 @@ LLM ANALYZER
 
 Uses a local Ollama LLM to analyze real student data.
 
-The analyzer is responsible for:
+Responsibilities:
 
 1. Student profile analysis
 2. Skill summary
@@ -16,16 +16,20 @@ The analyzer is responsible for:
 7. Overall assessment
 
 IMPORTANT:
-- No OpenAI API is required.
+
 - Ollama runs locally.
-- Only actual student information is provided to the LLM.
-- Passwords and internal MongoDB information are removed.
+- No OpenAI API required.
+- Only actual student information is provided.
+- Passwords and internal file paths are removed.
 - Automatically detected skills are read from:
+
       student["detected_skills"]
+
 - Job matching is NOT performed here.
 
 Job matching will be handled separately by:
-    services/job_matcher.py
+
+      services/job_matcher.py
 ===========================================================
 """
 
@@ -49,18 +53,9 @@ OLLAMA_TIMEOUT = 300
 # ============================================================
 
 def call_ollama(prompt):
+
     """
     Send a prompt to the local Ollama model.
-
-    Parameters
-    ----------
-    prompt : str
-        Prompt sent to Ollama.
-
-    Returns
-    -------
-    str
-        Raw LLM response.
     """
 
     try:
@@ -106,47 +101,42 @@ def call_ollama(prompt):
 
         return raw_response.strip()
 
-    # ========================================================
-    # OLLAMA CONNECTION ERROR
-    # ========================================================
 
     except requests.exceptions.ConnectionError as error:
 
         raise RuntimeError(
+
             "Could not connect to Ollama. "
-            "Make sure Ollama is installed, running, "
-            "and the required model is available."
+            "Make sure Ollama is running and "
+            "the required model is available."
+
         ) from error
 
-    # ========================================================
-    # OLLAMA TIMEOUT
-    # ========================================================
 
     except requests.exceptions.Timeout as error:
 
         raise RuntimeError(
-            "Ollama request timed out. "
-            "The local model may need more time."
+
+            "Ollama request timed out."
+
         ) from error
 
-    # ========================================================
-    # OTHER REQUEST ERROR
-    # ========================================================
 
     except requests.exceptions.RequestException as error:
 
         raise RuntimeError(
+
             f"Ollama request failed: {error}"
+
         ) from error
 
-    # ========================================================
-    # UNEXPECTED ERROR
-    # ========================================================
 
     except Exception as error:
 
         raise RuntimeError(
+
             f"Unexpected Ollama error: {error}"
+
         ) from error
 
 
@@ -155,9 +145,10 @@ def call_ollama(prompt):
 # ============================================================
 
 def clean_resume_data(resume):
+
     """
-    Remove internal/server-specific resume information
-    before sending the data to Ollama.
+    Remove internal file information and
+    extracted document text.
     """
 
     if not isinstance(
@@ -167,12 +158,56 @@ def clean_resume_data(resume):
 
         return {}
 
+
     cleaned_resume = dict(
         resume
     )
 
+
     # --------------------------------------------------------
-    # Remove physical/internal file information
+    # Resume file is nested inside:
+    #
+    # resume["file"]
+    # --------------------------------------------------------
+
+    file_data = cleaned_resume.get(
+        "file"
+    )
+
+
+    if isinstance(
+        file_data,
+        dict
+    ):
+
+        cleaned_file = dict(
+            file_data
+        )
+
+
+        cleaned_file.pop(
+            "file_path",
+            None
+        )
+
+        cleaned_file.pop(
+            "stored_filename",
+            None
+        )
+
+        cleaned_file.pop(
+            "extracted_text",
+            None
+        )
+
+
+        cleaned_resume[
+            "file"
+        ] = cleaned_file
+
+
+    # --------------------------------------------------------
+    # Remove possible direct internal fields
     # --------------------------------------------------------
 
     cleaned_resume.pop(
@@ -186,9 +221,10 @@ def clean_resume_data(resume):
     )
 
     cleaned_resume.pop(
-        "file",
+        "extracted_text",
         None
     )
+
 
     return cleaned_resume
 
@@ -198,9 +234,9 @@ def clean_resume_data(resume):
 # ============================================================
 
 def clean_certifications(certifications):
+
     """
-    Remove internal file information from certifications
-    while preserving useful certification information.
+    Remove internal certificate file information.
     """
 
     if not isinstance(
@@ -210,7 +246,9 @@ def clean_certifications(certifications):
 
         return []
 
+
     cleaned_certifications = []
+
 
     for certification in certifications:
 
@@ -221,17 +259,20 @@ def clean_certifications(certifications):
 
             continue
 
+
         certification_copy = dict(
             certification
         )
 
+
         # ----------------------------------------------------
-        # Clean uploaded file information
+        # Nested certificate file
         # ----------------------------------------------------
 
         file_data = certification_copy.get(
             "file"
         )
+
 
         if isinstance(
             file_data,
@@ -241,6 +282,7 @@ def clean_certifications(certifications):
             cleaned_file = dict(
                 file_data
             )
+
 
             cleaned_file.pop(
                 "file_path",
@@ -252,13 +294,41 @@ def clean_certifications(certifications):
                 None
             )
 
+            cleaned_file.pop(
+                "extracted_text",
+                None
+            )
+
+
             certification_copy[
                 "file"
             ] = cleaned_file
 
+
+        # ----------------------------------------------------
+        # Direct fields
+        # ----------------------------------------------------
+
+        certification_copy.pop(
+            "file_path",
+            None
+        )
+
+        certification_copy.pop(
+            "stored_filename",
+            None
+        )
+
+        certification_copy.pop(
+            "extracted_text",
+            None
+        )
+
+
         cleaned_certifications.append(
             certification_copy
         )
+
 
     return cleaned_certifications
 
@@ -268,8 +338,9 @@ def clean_certifications(certifications):
 # ============================================================
 
 def clean_projects(projects):
+
     """
-    Keep only meaningful project information.
+    Keep meaningful project information.
     """
 
     if not isinstance(
@@ -279,7 +350,9 @@ def clean_projects(projects):
 
         return []
 
+
     cleaned_projects = []
+
 
     for project in projects:
 
@@ -290,11 +363,12 @@ def clean_projects(projects):
 
             continue
 
+
         project_copy = dict(
             project
         )
 
-        # Remove unnecessary internal information
+
         project_copy.pop(
             "_id",
             None
@@ -305,18 +379,21 @@ def clean_projects(projects):
             None
         )
 
+
         cleaned_projects.append(
             project_copy
         )
+
 
     return cleaned_projects
 
 
 # ============================================================
-# CLEAN SKILLS
+# CLEAN MANUAL SKILLS
 # ============================================================
 
 def clean_skills(skills):
+
     """
     Clean manually entered skills.
     """
@@ -328,13 +405,12 @@ def clean_skills(skills):
 
         return []
 
+
     cleaned_skills = []
+
 
     for skill in skills:
 
-        # ----------------------------------------------------
-        # Skill stored as dictionary
-        # ----------------------------------------------------
 
         if isinstance(
             skill,
@@ -345,18 +421,17 @@ def clean_skills(skills):
                 skill
             )
 
+
             skill_copy.pop(
                 "_id",
                 None
             )
 
+
             cleaned_skills.append(
                 skill_copy
             )
 
-        # ----------------------------------------------------
-        # Skill stored as string
-        # ----------------------------------------------------
 
         elif isinstance(
             skill,
@@ -367,6 +442,7 @@ def clean_skills(skills):
                 skill
             )
 
+
     return cleaned_skills
 
 
@@ -375,13 +451,22 @@ def clean_skills(skills):
 # ============================================================
 
 def clean_detected_skills(detected_skills):
+
     """
     Clean automatically detected skills.
 
-    These skills come from:
-        Resume
-        Certificates
-        Skill extractor
+    Compatible with current student_routes.py:
+
+        student["detected_skills"] = {
+
+            "resume": [],
+            "certificates": [],
+            "all": [],
+            "categorized_skills": {},
+            "details": [],
+            "document_count": 0
+
+        }
     """
 
     if not isinstance(
@@ -397,49 +482,165 @@ def clean_detected_skills(detected_skills):
 
             "all": [],
 
-            "details": []
+            "categorized_skills": {},
+
+            "details": [],
+
+            "document_count": 0
 
         }
+
+
+    resume_skills = detected_skills.get(
+        "resume",
+        []
+    )
+
+
+    certificate_skills = detected_skills.get(
+        "certificates",
+        []
+    )
+
+
+    all_skills = detected_skills.get(
+        "all",
+        []
+    )
+
+
+    categorized_skills = detected_skills.get(
+        "categorized_skills",
+        {}
+    )
+
+
+    skill_details = detected_skills.get(
+        "details",
+        []
+    )
+
+
+    document_count = detected_skills.get(
+        "document_count",
+        0
+    )
+
+
+    # --------------------------------------------------------
+    # VALIDATE TYPES
+    # --------------------------------------------------------
+
+    if not isinstance(
+        resume_skills,
+        list
+    ):
+
+        resume_skills = []
+
+
+    if not isinstance(
+        certificate_skills,
+        list
+    ):
+
+        certificate_skills = []
+
+
+    if not isinstance(
+        all_skills,
+        list
+    ):
+
+        all_skills = []
+
+
+    if not isinstance(
+        categorized_skills,
+        dict
+    ):
+
+        categorized_skills = {}
+
+
+    if not isinstance(
+        skill_details,
+        list
+    ):
+
+        skill_details = []
+
+
+    try:
+
+        document_count = int(
+            document_count
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        document_count = 0
+
 
     return {
 
         "resume":
-            detected_skills.get(
-                "resume",
-                detected_skills.get(
-                    "resume_skills",
-                    []
-                )
-            ),
+            resume_skills,
 
         "certificates":
-            detected_skills.get(
-                "certificates",
-                detected_skills.get(
-                    "certificate_skills",
-                    []
-                )
-            ),
+            certificate_skills,
 
         "all":
-            detected_skills.get(
-                "all",
-                detected_skills.get(
-                    "skills",
-                    []
-                )
-            ),
+            all_skills,
+
+        "categorized_skills":
+            categorized_skills,
 
         "details":
-            detected_skills.get(
-                "details",
-                detected_skills.get(
-                    "skill_details",
-                    []
-                )
-            )
+            skill_details,
+
+        "document_count":
+            document_count
 
     }
+
+
+# ============================================================
+# GET DETECTED SKILLS
+# ============================================================
+
+def get_detected_skills(student):
+
+    """
+    Retrieve automatically detected skills.
+
+    CURRENT LOCATION:
+
+        student["detected_skills"]
+    """
+
+    if not isinstance(
+        student,
+        dict
+    ):
+
+        return clean_detected_skills(
+            {}
+        )
+
+
+    detected_skills = student.get(
+        "detected_skills",
+        {}
+    )
+
+
+    return clean_detected_skills(
+        detected_skills
+    )
 
 
 # ============================================================
@@ -447,24 +648,10 @@ def clean_detected_skills(detected_skills):
 # ============================================================
 
 def prepare_student_data(student):
+
     """
-    Prepare a clean student profile before sending it
-    to the LLM.
-
-    Internal information such as:
-        - password
-        - MongoDB _id
-        - physical file paths
-        - stored filenames
-
-    is removed.
-
-    IMPORTANT:
-    Automatically detected skills are taken directly from:
-
-        student["detected_skills"]
-
-    and NOT from llm_analysis.
+    Prepare a clean student profile before
+    sending data to the LLM.
     """
 
     if not isinstance(
@@ -476,8 +663,9 @@ def prepare_student_data(student):
             "Student data must be a dictionary."
         )
 
+
     # ========================================================
-    # BASIC STUDENT DATA
+    # BASIC DATA
     # ========================================================
 
     personal = student.get(
@@ -485,40 +673,94 @@ def prepare_student_data(student):
         {}
     )
 
+
     academic = student.get(
         "academic",
         {}
     )
+
 
     skills = student.get(
         "skills",
         []
     )
 
-    detected_skills = student.get(
-        "detected_skills",
-        {}
-    )
 
     certifications = student.get(
         "certifications",
         []
     )
 
+
     resume = student.get(
         "resume",
         {}
     )
+
 
     projects = student.get(
         "projects",
         []
     )
 
+
     career_preferences = student.get(
         "career_preferences",
         {}
     )
+
+
+    # ========================================================
+    # DETECTED SKILLS
+    # ========================================================
+
+    detected_skills = get_detected_skills(
+        student
+    )
+
+
+    # ========================================================
+    # CLEAN PERSONAL DATA
+    # ========================================================
+
+    if isinstance(
+        personal,
+        dict
+    ):
+
+        cleaned_personal = dict(
+            personal
+        )
+
+    else:
+
+        cleaned_personal = {}
+
+
+    # --------------------------------------------------------
+    # Remove private information
+    # --------------------------------------------------------
+
+    cleaned_personal.pop(
+        "email",
+        None
+    )
+
+    cleaned_personal.pop(
+        "mobile",
+        None
+    )
+
+    cleaned_personal.pop(
+        "password",
+        None
+    )
+
+    cleaned_personal.pop(
+        "_id",
+        None
+    )
+
 
     # ========================================================
     # CREATE CLEAN PROFILE
@@ -526,101 +768,92 @@ def prepare_student_data(student):
 
     student_data = {
 
-        "personal": (
-            personal
-            if isinstance(
-                personal,
-                dict
-            )
-            else {}
-        ),
+        "personal":
+            cleaned_personal,
 
-        "academic": (
+
+        "academic":
+
             academic
+
             if isinstance(
                 academic,
                 dict
             )
-            else {}
-        ),
 
-        "skills":
+            else {},
+
+
+        # ----------------------------------------------------
+        # MANUAL SKILLS
+        # ----------------------------------------------------
+
+        "manual_skills":
+
             clean_skills(
                 skills
             ),
 
+
+        # ----------------------------------------------------
+        # AUTOMATICALLY DETECTED SKILLS
+        # ----------------------------------------------------
+
         "detected_skills":
-            clean_detected_skills(
-                detected_skills
-            ),
+
+            detected_skills,
+
+
+        # ----------------------------------------------------
+        # CERTIFICATIONS
+        # ----------------------------------------------------
 
         "certifications":
+
             clean_certifications(
                 certifications
             ),
 
+
+        # ----------------------------------------------------
+        # RESUME
+        # ----------------------------------------------------
+
         "resume":
+
             clean_resume_data(
                 resume
             ),
 
+
+        # ----------------------------------------------------
+        # PROJECTS
+        # ----------------------------------------------------
+
         "projects":
+
             clean_projects(
                 projects
             ),
 
-        "career_preferences": (
+
+        # ----------------------------------------------------
+        # CAREER PREFERENCES
+        # ----------------------------------------------------
+
+        "career_preferences":
+
             career_preferences
+
             if isinstance(
                 career_preferences,
                 dict
             )
+
             else {}
-        )
 
     }
 
-    # ========================================================
-    # REMOVE SENSITIVE PERSONAL INFORMATION
-    # ========================================================
-
-    # We don't need these fields for skill analysis.
-
-    student_data["personal"].pop(
-        "password",
-        None
-    )
-
-    student_data["personal"].pop(
-        "_id",
-        None
-    )
-
-    # Email and mobile are also unnecessary for LLM analysis.
-
-    student_data["personal"].pop(
-        "email",
-        None
-    )
-
-    student_data["personal"].pop(
-        "mobile",
-        None
-    )
-
-    # ========================================================
-    # REMOVE INTERNAL INFORMATION
-    # ========================================================
-
-    student_data.pop(
-        "_id",
-        None
-    )
-
-    student_data.pop(
-        "password",
-        None
-    )
 
     return student_data
 
@@ -630,11 +863,9 @@ def prepare_student_data(student):
 # ============================================================
 
 def build_analysis_prompt(student_data):
-    """
-    Build the prompt used by Ollama.
 
-    The LLM is instructed to analyze only the student's
-    actual information.
+    """
+    Build prompt for Ollama.
     """
 
     student_json = json.dumps(
@@ -649,6 +880,7 @@ def build_analysis_prompt(student_data):
 
     )
 
+
     prompt = f"""
 You are an AI-powered Student Skill Analyzer.
 
@@ -662,44 +894,42 @@ STRICT ANALYSIS RULES
 
 1. Do NOT invent skills.
 
-2. Do NOT assume the student knows a technology that
-   does not appear in the supplied information.
+2. Do NOT assume the student knows a technology
+that does not appear in the supplied information.
 
 3. Do NOT create fake certifications.
 
 4. Do NOT create fake projects.
 
-5. Do NOT assume experience that is not provided.
+5. Do NOT assume work experience.
 
-6. Clearly distinguish manually entered skills from
-   automatically detected document skills.
+6. Clearly distinguish manually entered skills
+from automatically detected document skills.
 
-7. Use academic information when evaluating the student's
-   current profile.
+7. Use academic information only when it exists.
 
 8. Use projects and certifications as supporting evidence.
 
-9. Use career preferences and learning goals when analyzing
-   suitable career directions.
+9. Use career preferences and learning goals when available.
 
 10. Identify realistic skill gaps.
 
-11. Learning recommendations should directly address
-    identified skill gaps.
+11. Learning recommendations must directly address
+identified skill gaps.
 
-12. If there is insufficient information, explicitly say
-    that there is insufficient information.
+12. If information is insufficient,
+explicitly mention that.
 
-13. Do NOT use predefined career recommendations.
+13. Do NOT recommend roles simply because they are popular.
 
-14. Do NOT recommend a role merely because it is popular.
+14. Do NOT invent job requirements.
 
-15. Do NOT invent job requirements.
+15. Do NOT perform company matching.
 
-16. Do NOT perform company/job matching in this analysis.
+16. Do NOT perform job matching.
 
-17. Job matching will be handled separately by the
-    application's job matching service.
+17. Job matching is handled separately by the
+application's job matching service.
 
 18. Return ONLY valid JSON.
 
@@ -715,7 +945,7 @@ STUDENT PROFILE
 OUTPUT FORMAT
 ============================================================
 
-Return exactly one JSON object with this structure:
+Return exactly one JSON object:
 
 {{
     "skill_summary": "Concise summary of the student's current profile and skills.",
@@ -740,7 +970,9 @@ Return exactly one JSON object with this structure:
                 "reason": "Why this role matches the student's actual profile"
             }}
         ],
-        "career_reasoning": "Overall explanation of career suitability."
+
+        "career_reasoning":
+            "Overall explanation of career suitability."
     }},
 
     "learning_recommendations": [
@@ -750,7 +982,8 @@ Return exactly one JSON object with this structure:
         }}
     ],
 
-    "overall_assessment": "Overall assessment of the student's current profile."
+    "overall_assessment":
+        "Overall assessment of the student's current profile."
 }}
 
 ============================================================
@@ -759,7 +992,7 @@ OVERALL SCORE RULE
 
 Give an overall score from 0 to 10.
 
-The score should consider:
+Consider only information actually provided:
 
 - Academic profile
 - Manually entered skills
@@ -769,7 +1002,7 @@ The score should consider:
 - Career preferences
 - Learning goals
 
-Do not award points for information that is not present.
+Do not award points for missing information.
 
 ============================================================
 FINAL REMINDER
@@ -781,10 +1014,13 @@ Do not invent missing information.
 
 Do not hard-code career roles.
 
-Do not perform company/job matching.
+Do not perform company matching.
+
+Do not perform job matching.
 
 Return valid JSON only.
 """
+
 
     return prompt
 
@@ -794,14 +1030,9 @@ Return valid JSON only.
 # ============================================================
 
 def parse_llm_response(raw_response):
-    """
-    Convert the LLM response into a Python dictionary.
 
-    Handles:
-    - Valid JSON
-    - JSON surrounded by whitespace
-    - Invalid JSON
-    - Empty responses
+    """
+    Convert LLM response into a Python dictionary.
     """
 
     if not raw_response:
@@ -813,11 +1044,13 @@ def parse_llm_response(raw_response):
 
         }
 
+
     try:
 
         parsed_response = json.loads(
             raw_response
         )
+
 
         if isinstance(
             parsed_response,
@@ -825,6 +1058,7 @@ def parse_llm_response(raw_response):
         ):
 
             return parsed_response
+
 
         return {
 
@@ -836,12 +1070,14 @@ def parse_llm_response(raw_response):
 
         }
 
+
     except json.JSONDecodeError as error:
 
         print(
             "LLM JSON parsing error:",
             error
         )
+
 
         return {
 
@@ -859,10 +1095,9 @@ def parse_llm_response(raw_response):
 # ============================================================
 
 def validate_analysis(analysis):
+
     """
     Ensure the LLM result has the expected structure.
-
-    Missing fields are filled with safe defaults.
     """
 
     if not isinstance(
@@ -877,8 +1112,9 @@ def validate_analysis(analysis):
 
         }
 
+
     # ========================================================
-    # BASIC FIELDS
+    # SKILL SUMMARY
     # ========================================================
 
     if not isinstance(
@@ -892,6 +1128,7 @@ def validate_analysis(analysis):
             "skill_summary"
         ] = ""
 
+
     # ========================================================
     # OVERALL SCORE
     # ========================================================
@@ -900,23 +1137,26 @@ def validate_analysis(analysis):
         "overall_score"
     )
 
+
     try:
 
         score = float(
             score
         )
 
-        if score < 0:
+        score = max(
+            0,
+            min(
+                10,
+                score
+            )
+        )
 
-            score = 0
-
-        if score > 10:
-
-            score = 10
 
         analysis[
             "overall_score"
         ] = score
+
 
     except (
         TypeError,
@@ -926,6 +1166,7 @@ def validate_analysis(analysis):
         analysis[
             "overall_score"
         ] = None
+
 
     # ========================================================
     # STRENGTHS
@@ -942,6 +1183,7 @@ def validate_analysis(analysis):
             "strengths"
         ] = []
 
+
     # ========================================================
     # SKILL GAPS
     # ========================================================
@@ -957,6 +1199,7 @@ def validate_analysis(analysis):
             "skill_gaps"
         ] = []
 
+
     # ========================================================
     # CAREER ANALYSIS
     # ========================================================
@@ -965,12 +1208,14 @@ def validate_analysis(analysis):
         "career_analysis"
     )
 
+
     if not isinstance(
         career_analysis,
         dict
     ):
 
         career_analysis = {}
+
 
     if not isinstance(
         career_analysis.get(
@@ -983,6 +1228,7 @@ def validate_analysis(analysis):
             "suitable_roles"
         ] = []
 
+
     if not isinstance(
         career_analysis.get(
             "career_reasoning"
@@ -994,9 +1240,11 @@ def validate_analysis(analysis):
             "career_reasoning"
         ] = ""
 
+
     analysis[
         "career_analysis"
     ] = career_analysis
+
 
     # ========================================================
     # LEARNING RECOMMENDATIONS
@@ -1013,6 +1261,7 @@ def validate_analysis(analysis):
             "learning_recommendations"
         ] = []
 
+
     # ========================================================
     # OVERALL ASSESSMENT
     # ========================================================
@@ -1028,6 +1277,7 @@ def validate_analysis(analysis):
             "overall_assessment"
         ] = ""
 
+
     return analysis
 
 
@@ -1036,76 +1286,74 @@ def validate_analysis(analysis):
 # ============================================================
 
 def analyze_student(student):
+
     """
-    Analyze an actual student profile using Ollama.
-
-    Parameters
-    ----------
-    student : dict
-        Student document retrieved from MongoDB.
-
-    Returns
-    -------
-    dict
-        Structured LLM analysis.
+    Analyze a real student profile using Ollama.
     """
 
-    # ========================================================
-    # PREPARE STUDENT DATA
-    # ========================================================
+    # --------------------------------------------------------
+    # PREPARE DATA
+    # --------------------------------------------------------
 
     student_data = prepare_student_data(
         student
     )
 
-    # ========================================================
+
+    # --------------------------------------------------------
     # BUILD PROMPT
-    # ========================================================
+    # --------------------------------------------------------
 
     prompt = build_analysis_prompt(
         student_data
     )
 
-    # ========================================================
+
+    # --------------------------------------------------------
     # CALL OLLAMA
-    # ========================================================
+    # --------------------------------------------------------
 
     raw_response = call_ollama(
         prompt
     )
 
-    # ========================================================
+
+    # --------------------------------------------------------
     # PARSE RESPONSE
-    # ========================================================
+    # --------------------------------------------------------
 
     analysis = parse_llm_response(
         raw_response
     )
 
-    # ========================================================
-    # CHECK ERROR
-    # ========================================================
+
+    # --------------------------------------------------------
+    # RETURN ERROR
+    # --------------------------------------------------------
 
     if "error" in analysis:
 
         return analysis
 
-    # ========================================================
-    # VALIDATE STRUCTURE
-    # ========================================================
+
+    # --------------------------------------------------------
+    # VALIDATE RESPONSE
+    # --------------------------------------------------------
 
     analysis = validate_analysis(
         analysis
     )
 
+
     return analysis
 
 
 # ============================================================
-# SIMPLE LOCAL TEST
+# LOCAL TEST
 # ============================================================
 
 if __name__ == "__main__":
+
 
     test_student = {
 
@@ -1125,6 +1373,7 @@ if __name__ == "__main__":
 
         },
 
+
         "academic": {
 
             "current_cgpa":
@@ -1135,9 +1384,6 @@ if __name__ == "__main__":
 
         },
 
-        # ----------------------------------------------------
-        # MANUALLY ENTERED SKILLS
-        # ----------------------------------------------------
 
         "skills": [
 
@@ -1150,10 +1396,7 @@ if __name__ == "__main__":
                     "Programming",
 
                 "proficiency":
-                    "Advanced",
-
-                "source":
-                    "manual"
+                    "Advanced"
 
             },
 
@@ -1163,24 +1406,15 @@ if __name__ == "__main__":
                     "MongoDB",
 
                 "category":
-                    "Databases",
+                    "Database",
 
                 "proficiency":
-                    "Intermediate",
-
-                "source":
-                    "manual"
+                    "Intermediate"
 
             }
 
         ],
 
-        # ----------------------------------------------------
-        # AUTOMATICALLY DETECTED SKILLS
-        #
-        # IMPORTANT:
-        # This is now read from student["detected_skills"]
-        # ----------------------------------------------------
 
         "detected_skills": {
 
@@ -1188,17 +1422,13 @@ if __name__ == "__main__":
 
                 "Python",
 
-                "Flask",
-
-                "REST API"
+                "Flask"
 
             ],
 
             "certificates": [
 
-                "Java",
-
-                "SQL"
+                "MongoDB"
 
             ],
 
@@ -1208,27 +1438,54 @@ if __name__ == "__main__":
 
                 "Flask",
 
-                "REST API",
-
-                "Java",
-
-                "SQL"
+                "MongoDB"
 
             ],
 
-            "details": []
+            "categorized_skills": {
+
+                "Programming": [
+
+                    "Python"
+
+                ],
+
+                "Web Development": [
+
+                    "Flask"
+
+                ],
+
+                "Databases": [
+
+                    "MongoDB"
+
+                ]
+
+            },
+
+            "details": [
+
+                {
+
+                    "name":
+                        "Python",
+
+                    "category":
+                        "Programming",
+
+                    "source":
+                        "document"
+
+                }
+
+            ],
+
+            "document_count":
+                2
 
         },
 
-        # ----------------------------------------------------
-        # CERTIFICATIONS
-        # ----------------------------------------------------
-
-        "certifications": [],
-
-        # ----------------------------------------------------
-        # RESUME
-        # ----------------------------------------------------
 
         "resume": {
 
@@ -1240,9 +1497,9 @@ if __name__ == "__main__":
 
         },
 
-        # ----------------------------------------------------
-        # PROJECTS
-        # ----------------------------------------------------
+
+        "certifications": [],
+
 
         "projects": [
 
@@ -1252,15 +1509,12 @@ if __name__ == "__main__":
                     "Student Management System",
 
                 "description":
-                    "A web application built using Python and MongoDB."
+                    "Web application using Python, Flask and MongoDB."
 
             }
 
         ],
 
-        # ----------------------------------------------------
-        # CAREER PREFERENCES
-        # ----------------------------------------------------
 
         "career_preferences": {
 
@@ -1268,30 +1522,18 @@ if __name__ == "__main__":
                 "Software Development",
 
             "preferred_job_role":
-                "",
-
-            "preferred_location":
-                "",
+                "Backend Developer",
 
             "career_goal":
                 "Become a software developer",
 
             "learning_goal":
-                "Improve programming and backend development skills"
+                "Improve backend development skills"
 
-        },
-
-        # ----------------------------------------------------
-        # INTERNAL DATA
-        # ----------------------------------------------------
-
-        "_id":
-            "internal-id",
-
-        "password":
-            "should-never-be-sent-to-llm"
+        }
 
     }
+
 
     print(
         "\n========================================"
@@ -1305,19 +1547,28 @@ if __name__ == "__main__":
         "========================================"
     )
 
+
     try:
 
         result = analyze_student(
             test_student
         )
 
+
         print(
+
             json.dumps(
+
                 result,
+
                 indent=4,
+
                 ensure_ascii=False
+
             )
+
         )
+
 
     except Exception as error:
 
@@ -1328,6 +1579,7 @@ if __name__ == "__main__":
         print(
             error
         )
+
 
     print(
         "\n========================================"

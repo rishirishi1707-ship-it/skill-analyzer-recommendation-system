@@ -320,6 +320,14 @@ if __name__ == "__main__":
     )
 
     print(
+        "\nJob Recommendations API:"
+    )
+
+    print(
+        "http://127.0.0.1:5000/api/students/job-recommendations"
+    )
+
+    print(
         "\nHealth API:"
     )
 

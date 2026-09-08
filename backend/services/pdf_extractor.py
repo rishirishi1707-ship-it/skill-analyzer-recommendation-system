@@ -1,3 +1,7 @@
+# ============================================================
+# services/pdf_extractor.py
+# ============================================================
+
 """
 Document Text Extractor
 -----------------------
@@ -14,17 +18,27 @@ Features:
 - OCR fallback for scanned/image-based PDFs
 - OCR extraction from certificate images
 - DOCX text extraction
+- Image preprocessing for better OCR accuracy
 
 Used by:
-- upload_routes.py
-- skill_extractor.py
+- routes/upload_routes.py
+- services/skill_extractor.py
 """
+
 
 import os
 
 import fitz
+
 from docx import Document
-from PIL import Image
+
+from PIL import (
+    Image,
+    ImageOps,
+    ImageEnhance,
+    ImageFilter
+)
+
 import pytesseract
 
 
@@ -65,7 +79,7 @@ else:
 
 
 # ============================================================
-# SUPPORTED IMAGE TYPES
+# CONFIGURATION
 # ============================================================
 
 SUPPORTED_IMAGE_EXTENSIONS = {
@@ -80,6 +94,21 @@ SUPPORTED_IMAGE_EXTENSIONS = {
 
 
 # ============================================================
+# PDF CONFIGURATION
+# ============================================================
+
+# If direct extraction is shorter than this,
+# OCR fallback will be attempted.
+
+MINIMUM_DIRECT_TEXT_LENGTH = 100
+
+
+# PDF OCR resolution
+
+PDF_OCR_SCALE = 3
+
+
+# ============================================================
 # CHECK TESSERACT
 # ============================================================
 
@@ -87,7 +116,7 @@ def check_tesseract():
 
     """
     Check whether Tesseract OCR
-    is available and working.
+    is installed and available.
     """
 
     try:
@@ -96,11 +125,14 @@ def check_tesseract():
             pytesseract.get_tesseract_version()
         )
 
+
         print(
             f"Tesseract OCR Version: {version}"
         )
 
+
         return True
+
 
     except Exception as error:
 
@@ -112,28 +144,250 @@ def check_tesseract():
             error
         )
 
+
         return False
+
+
+# ============================================================
+# CLEAN EXTRACTED TEXT
+# ============================================================
+
+def clean_text(text):
+
+    """
+    Clean extracted document text.
+    """
+
+    if not text:
+
+        return ""
+
+
+    text = str(
+        text
+    )
+
+
+    # Normalize line endings
+
+    text = text.replace(
+        "\r\n",
+        "\n"
+    )
+
+    text = text.replace(
+        "\r",
+        "\n"
+    )
+
+
+    # Remove unnecessary blank lines
+
+    lines = []
+
+
+    for line in text.split(
+        "\n"
+    ):
+
+        cleaned_line = line.strip()
+
+
+        if cleaned_line:
+
+            lines.append(
+                cleaned_line
+            )
+
+
+    return "\n".join(
+        lines
+    ).strip()
+
+
+# ============================================================
+# PREPROCESS IMAGE FOR OCR
+# ============================================================
+
+def preprocess_image(
+    image
+):
+
+    """
+    Improve image before OCR.
+
+    Steps:
+
+    - Convert to grayscale
+    - Improve contrast
+    - Improve brightness
+    - Sharpen image
+    - Increase resolution
+    """
+
+    try:
+
+        # ----------------------------------------------------
+        # FIX IMAGE ORIENTATION
+        # ----------------------------------------------------
+
+        image = ImageOps.exif_transpose(
+            image
+        )
+
+
+        # ----------------------------------------------------
+        # CONVERT TO GRAYSCALE
+        # ----------------------------------------------------
+
+        image = image.convert(
+            "L"
+        )
+
+
+        # ----------------------------------------------------
+        # AUTOCONTRAST
+        # ----------------------------------------------------
+
+        image = ImageOps.autocontrast(
+            image
+        )
+
+
+        # ----------------------------------------------------
+        # CONTRAST
+        # ----------------------------------------------------
+
+        image = ImageEnhance.Contrast(
+            image
+        ).enhance(
+            2.0
+        )
+
+
+        # ----------------------------------------------------
+        # BRIGHTNESS
+        # ----------------------------------------------------
+
+        image = ImageEnhance.Brightness(
+            image
+        ).enhance(
+            1.15
+        )
+
+
+        # ----------------------------------------------------
+        # SHARPEN
+        # ----------------------------------------------------
+
+        image = image.filter(
+            ImageFilter.SHARPEN
+        )
+
+
+        # ----------------------------------------------------
+        # RESIZE
+        # ----------------------------------------------------
+
+        width, height = image.size
+
+
+        # Avoid unnecessary massive images
+
+        if width < 3000:
+
+            new_width = (
+                width * 2
+            )
+
+            new_height = (
+                height * 2
+            )
+
+
+            image = image.resize(
+
+                (
+                    new_width,
+                    new_height
+                ),
+
+                Image.Resampling.LANCZOS
+
+            )
+
+
+        return image
+
+
+    except Exception as error:
+
+        print(
+            f"Image preprocessing error: {error}"
+        )
+
+
+        return image
+
+
+# ============================================================
+# OCR IMAGE
+# ============================================================
+
+def run_ocr(
+    image
+):
+
+    """
+    Run OCR on processed image.
+    """
+
+    try:
+
+        text = pytesseract.image_to_string(
+
+            image,
+
+            config=(
+                "--oem 3 "
+                "--psm 6"
+            )
+
+        )
+
+
+        return clean_text(
+            text
+        )
+
+
+    except Exception as error:
+
+        print(
+            f"OCR error: {error}"
+        )
+
+
+        return ""
 
 
 # ============================================================
 # EXTRACT TEXT FROM IMAGE
 # ============================================================
 
-def extract_text_from_image(file_path):
+def extract_text_from_image(
+    file_path
+):
 
     """
-    Extract text from an image using OCR.
-
-    Supported:
-
-    - JPG
-    - JPEG
-    - PNG
+    Extract text from JPG, JPEG
+    or PNG using OCR.
     """
 
     if not check_tesseract():
 
         return ""
+
 
     try:
 
@@ -147,28 +401,34 @@ def extract_text_from_image(file_path):
         )
 
 
-        # Convert image to RGB
-        #
-        # This prevents some OCR issues
-        # with PNG transparency.
-
-        if image.mode != "RGB":
-
-            image = image.convert(
-                "RGB"
+        processed_image = (
+            preprocess_image(
+                image
             )
-
-
-        text = pytesseract.image_to_string(
-
-            image,
-
-            config="--psm 6"
-
         )
 
 
-        return text.strip()
+        text = run_ocr(
+            processed_image
+        )
+
+
+        print(
+            f"OCR extracted "
+            f"{len(text)} characters."
+        )
+
+
+        print(
+            "OCR TEXT PREVIEW:"
+        )
+
+        print(
+            text[:500]
+        )
+
+
+        return text
 
 
     except Exception as error:
@@ -177,6 +437,7 @@ def extract_text_from_image(file_path):
             f"OCR image extraction error: {error}"
         )
 
+
         return ""
 
 
@@ -184,13 +445,12 @@ def extract_text_from_image(file_path):
 # EXTRACT TEXT FROM NORMAL PDF
 # ============================================================
 
-def extract_text_from_pdf(file_path):
+def extract_text_from_pdf_direct(
+    file_path
+):
 
     """
     Extract text directly from PDF.
-
-    If no selectable text exists,
-    OCR fallback is used.
     """
 
     extracted_text = ""
@@ -210,31 +470,45 @@ def extract_text_from_pdf(file_path):
         )
 
 
-        for page_number, page in enumerate(
-            document,
-            start=1
+        for page_number in range(
+            len(document)
         ):
 
-            page_text = page.get_text()
+            page = document.load_page(
+                page_number
+            )
+
+
+            page_text = page.get_text(
+                "text"
+            )
+
 
             if page_text:
 
                 extracted_text += (
+
                     page_text
+
                     + "\n"
+
                 )
 
 
             print(
-                f"PDF page {page_number} processed."
+
+                f"PDF page "
+                f"{page_number + 1} processed."
+
             )
 
 
     except Exception as error:
 
         print(
-            f"PDF text extraction error: {error}"
+            f"PDF direct extraction error: {error}"
         )
+
 
         return ""
 
@@ -246,46 +520,31 @@ def extract_text_from_pdf(file_path):
             document.close()
 
 
-    # --------------------------------------------------------
-    # DIRECT TEXT FOUND
-    # --------------------------------------------------------
+    extracted_text = clean_text(
+        extracted_text
+    )
 
-    if extracted_text.strip():
-
-        print(
-            "Direct PDF text extraction successful."
-        )
-
-        return extracted_text.strip()
-
-
-    # --------------------------------------------------------
-    # OCR FALLBACK
-    # --------------------------------------------------------
 
     print(
-        "No selectable PDF text found."
-    )
-
-    print(
-        "Trying OCR on scanned PDF..."
+        f"Direct PDF extraction returned "
+        f"{len(extracted_text)} characters."
     )
 
 
-    return extract_text_from_scanned_pdf(
-        file_path
-    )
+    return extracted_text
 
 
 # ============================================================
 # OCR FOR SCANNED PDF
 # ============================================================
 
-def extract_text_from_scanned_pdf(file_path):
+def extract_text_from_scanned_pdf(
+    file_path
+):
 
     """
-    Convert scanned PDF pages into images
-    and extract text using OCR.
+    Convert PDF pages to images
+    and perform OCR.
     """
 
     if not check_tesseract():
@@ -311,7 +570,8 @@ def extract_text_from_scanned_pdf(file_path):
 
 
         print(
-            f"Running OCR on {total_pages} PDF page(s)..."
+            f"Running OCR on "
+            f"{total_pages} PDF page(s)..."
         )
 
 
@@ -326,13 +586,14 @@ def extract_text_from_scanned_pdf(file_path):
 
             # ------------------------------------------------
             # HIGHER RESOLUTION
-            #
-            # Better OCR accuracy
             # ------------------------------------------------
 
             matrix = fitz.Matrix(
-                2,
-                2
+
+                PDF_OCR_SCALE,
+
+                PDF_OCR_SCALE
+
             )
 
 
@@ -359,14 +620,23 @@ def extract_text_from_scanned_pdf(file_path):
             )
 
 
-            page_text = (
-                pytesseract.image_to_string(
+            # ------------------------------------------------
+            # PREPROCESS
+            # ------------------------------------------------
 
-                    image,
-
-                    config="--psm 6"
-
+            processed_image = (
+                preprocess_image(
+                    image
                 )
+            )
+
+
+            # ------------------------------------------------
+            # OCR
+            # ------------------------------------------------
+
+            page_text = run_ocr(
+                processed_image
             )
 
 
@@ -384,12 +654,33 @@ def extract_text_from_scanned_pdf(file_path):
             print(
 
                 f"OCR completed for page "
-                f"{page_number + 1}/{total_pages}"
+                f"{page_number + 1}/"
+                f"{total_pages}"
 
             )
 
 
-        return extracted_text.strip()
+        extracted_text = clean_text(
+            extracted_text
+        )
+
+
+        print(
+            f"Total OCR extracted characters: "
+            f"{len(extracted_text)}"
+        )
+
+
+        print(
+            "OCR TEXT PREVIEW:"
+        )
+
+        print(
+            extracted_text[:500]
+        )
+
+
+        return extracted_text
 
 
     except Exception as error:
@@ -397,6 +688,7 @@ def extract_text_from_scanned_pdf(file_path):
         print(
             f"Scanned PDF OCR error: {error}"
         )
+
 
         return ""
 
@@ -409,13 +701,120 @@ def extract_text_from_scanned_pdf(file_path):
 
 
 # ============================================================
+# EXTRACT TEXT FROM PDF
+# ============================================================
+
+def extract_text_from_pdf(
+    file_path
+):
+
+    """
+    Extract PDF text.
+
+    First tries direct extraction.
+
+    If extracted text is too short,
+    OCR fallback is used.
+    """
+
+    # ========================================================
+    # DIRECT EXTRACTION
+    # ========================================================
+
+    direct_text = (
+        extract_text_from_pdf_direct(
+            file_path
+        )
+    )
+
+
+    # ========================================================
+    # DIRECT EXTRACTION SUCCESS
+    # ========================================================
+
+    if len(
+        direct_text
+    ) >= MINIMUM_DIRECT_TEXT_LENGTH:
+
+        print(
+            "Direct PDF text extraction successful."
+        )
+
+
+        print(
+            "TEXT PREVIEW:"
+        )
+
+        print(
+            direct_text[:500]
+        )
+
+
+        return direct_text
+
+
+    # ========================================================
+    # OCR FALLBACK
+    # ========================================================
+
+    print(
+        "Direct PDF text is missing or too short."
+    )
+
+
+    print(
+        "Trying OCR on PDF..."
+    )
+
+
+    ocr_text = (
+        extract_text_from_scanned_pdf(
+            file_path
+        )
+    )
+
+
+    # ========================================================
+    # RETURN BEST RESULT
+    # ========================================================
+
+    if len(
+        ocr_text
+    ) > len(
+        direct_text
+    ):
+
+        print(
+            "Using OCR extracted text."
+        )
+
+
+        return ocr_text
+
+
+    print(
+        "Using direct extracted text."
+    )
+
+
+    return direct_text
+
+
+# ============================================================
 # EXTRACT TEXT FROM DOCX
 # ============================================================
 
-def extract_text_from_docx(file_path):
+def extract_text_from_docx(
+    file_path
+):
 
     """
     Extract text from DOCX files.
+
+    Extracts:
+
+    - Paragraphs
+    - Tables
     """
 
     try:
@@ -430,29 +829,34 @@ def extract_text_from_docx(file_path):
         )
 
 
-        paragraphs = []
+        text_parts = []
 
 
-        # ----------------------------------------------------
-        # NORMAL PARAGRAPHS
-        # ----------------------------------------------------
+        # ====================================================
+        # PARAGRAPHS
+        # ====================================================
 
-        for paragraph in document.paragraphs:
+        for paragraph in (
+            document.paragraphs
+        ):
 
             text = paragraph.text.strip()
 
+
             if text:
 
-                paragraphs.append(
+                text_parts.append(
                     text
                 )
 
 
-        # ----------------------------------------------------
-        # TABLE CONTENT
-        # ----------------------------------------------------
+        # ====================================================
+        # TABLES
+        # ====================================================
 
-        for table in document.tables:
+        for table in (
+            document.tables
+        ):
 
             for row in table.rows:
 
@@ -460,24 +864,44 @@ def extract_text_from_docx(file_path):
 
                     text = cell.text.strip()
 
+
                     if text:
 
-                        paragraphs.append(
+                        text_parts.append(
                             text
                         )
 
 
+        # ====================================================
+        # COMBINE
+        # ====================================================
+
         extracted_text = "\n".join(
-            paragraphs
+            text_parts
+        )
+
+
+        extracted_text = clean_text(
+            extracted_text
         )
 
 
         print(
-            "DOCX extraction completed."
+            f"DOCX extracted "
+            f"{len(extracted_text)} characters."
         )
 
 
-        return extracted_text.strip()
+        print(
+            "TEXT PREVIEW:"
+        )
+
+        print(
+            extracted_text[:500]
+        )
+
+
+        return extracted_text
 
 
     except Exception as error:
@@ -486,6 +910,7 @@ def extract_text_from_docx(file_path):
             f"DOCX extraction error: {error}"
         )
 
+
         return ""
 
 
@@ -493,34 +918,26 @@ def extract_text_from_docx(file_path):
 # MAIN FILE EXTRACTOR
 # ============================================================
 
-def extract_text_from_file(file_path):
+def extract_text_from_file(
+    file_path
+):
 
     """
     Automatically detect file type
     and extract text.
-
-    Supported:
-
-    - PDF
-    - DOCX
-    - JPG
-    - JPEG
-    - PNG
-
-    Returns:
-
-    str
     """
 
-    # --------------------------------------------------------
-    # VALIDATE PATH
-    # --------------------------------------------------------
+
+    # ========================================================
+    # VALIDATE FILE
+    # ========================================================
 
     if not file_path:
 
         print(
             "No file path provided."
         )
+
 
         return ""
 
@@ -530,15 +947,17 @@ def extract_text_from_file(file_path):
     ):
 
         print(
-            f"File does not exist: {file_path}"
+            f"File does not exist: "
+            f"{file_path}"
         )
+
 
         return ""
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # GET EXTENSION
-    # --------------------------------------------------------
+    # ========================================================
 
     extension = (
 
@@ -575,9 +994,9 @@ def extract_text_from_file(file_path):
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # PDF
-    # --------------------------------------------------------
+    # ========================================================
 
     if extension == "pdf":
 
@@ -586,9 +1005,9 @@ def extract_text_from_file(file_path):
         )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # DOCX
-    # --------------------------------------------------------
+    # ========================================================
 
     if extension == "docx":
 
@@ -597,9 +1016,9 @@ def extract_text_from_file(file_path):
         )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # IMAGE
-    # --------------------------------------------------------
+    # ========================================================
 
     if extension in (
         SUPPORTED_IMAGE_EXTENSIONS
@@ -610,20 +1029,21 @@ def extract_text_from_file(file_path):
         )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # UNSUPPORTED
-    # --------------------------------------------------------
+    # ========================================================
 
     print(
         f"Unsupported file type: "
         f"{extension}"
     )
 
+
     return ""
 
 
 # ============================================================
-# SIMPLE TEST
+# TEST
 # ============================================================
 
 if __name__ == "__main__":
@@ -641,16 +1061,16 @@ if __name__ == "__main__":
     )
 
 
-    # --------------------------------------------------------
-    # CHECK TESSERACT
-    # --------------------------------------------------------
+    # ========================================================
+    # CHECK OCR
+    # ========================================================
 
     check_tesseract()
 
 
-    # --------------------------------------------------------
-    # FILE INPUT
-    # --------------------------------------------------------
+    # ========================================================
+    # GET FILE
+    # ========================================================
 
     test_file = input(
 
@@ -659,9 +1079,9 @@ if __name__ == "__main__":
     ).strip()
 
 
-    # --------------------------------------------------------
-    # EXTRACT TEXT
-    # --------------------------------------------------------
+    # ========================================================
+    # EXTRACT
+    # ========================================================
 
     extracted_text = (
         extract_text_from_file(
@@ -670,16 +1090,16 @@ if __name__ == "__main__":
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # RESULT
-    # --------------------------------------------------------
+    # ========================================================
 
     print(
         "\n========================================"
     )
 
     print(
-        "EXTRACTED TEXT"
+        "FINAL EXTRACTED TEXT"
     )
 
     print(

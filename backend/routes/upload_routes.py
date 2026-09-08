@@ -1,12 +1,24 @@
+# =========================================================
+# routes/upload_routes.py
+# =========================================================
+
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
+
 from config import db
 
-from services.pdf_extractor import extract_text_from_file
-from services.skill_extractor import extract_skills_from_documents
+from services.pdf_extractor import (
+    extract_text_from_file
+)
+
+from services.skill_extractor import (
+    extract_skills_from_documents
+)
 
 from bson import ObjectId
 from bson.errors import InvalidId
+
+from datetime import datetime, timezone
 
 import os
 import uuid
@@ -39,15 +51,18 @@ BASE_DIR = os.path.dirname(
     )
 )
 
+
 UPLOAD_FOLDER = os.path.join(
     BASE_DIR,
     "uploads"
 )
 
+
 RESUME_FOLDER = os.path.join(
     UPLOAD_FOLDER,
     "resumes"
 )
+
 
 CERTIFICATE_FOLDER = os.path.join(
     UPLOAD_FOLDER,
@@ -59,6 +74,7 @@ os.makedirs(
     RESUME_FOLDER,
     exist_ok=True
 )
+
 
 os.makedirs(
     CERTIFICATE_FOLDER,
@@ -75,8 +91,10 @@ ALLOWED_RESUME_EXTENSIONS = {
     "docx"
 }
 
+
 ALLOWED_CERTIFICATE_EXTENSIONS = {
     "pdf",
+    "docx",
     "jpg",
     "jpeg",
     "png"
@@ -84,7 +102,37 @@ ALLOWED_CERTIFICATE_EXTENSIONS = {
 
 
 # =========================================================
-# HELPER: ALLOWED FILE
+# HELPER: CURRENT UTC TIME
+# =========================================================
+
+def utc_now():
+
+    return datetime.now(
+        timezone.utc
+    )
+
+
+# =========================================================
+# HELPER: EMPTY DETECTED SKILLS
+# =========================================================
+
+def empty_detected_skills():
+
+    return {
+
+        "skills": [],
+
+        "categorized_skills": {},
+
+        "skill_details": [],
+
+        "document_count": 0
+
+    }
+
+
+# =========================================================
+# HELPER: CHECK ALLOWED FILE
 # =========================================================
 
 def allowed_file(
@@ -95,13 +143,16 @@ def allowed_file(
     if not filename:
         return False
 
+
     if "." not in filename:
         return False
+
 
     extension = filename.rsplit(
         ".",
         1
     )[-1].lower()
+
 
     return extension in allowed_extensions
 
@@ -110,7 +161,9 @@ def allowed_file(
 # HELPER: GET STUDENT OBJECT ID
 # =========================================================
 
-def get_student_object_id(student_id):
+def get_student_object_id(
+    student_id
+):
 
     try:
 
@@ -118,187 +171,650 @@ def get_student_object_id(student_id):
             student_id
         )
 
-    except InvalidId:
+
+    except (
+        InvalidId,
+        TypeError
+    ):
 
         return None
 
 
 # =========================================================
-# HELPER: COMBINE DOCUMENT TEXT
+# HELPER: GET STUDENT
 # =========================================================
 
-def get_all_document_text(student):
+def get_student(
+    object_id
+):
 
-    document_texts = []
+    return students_collection.find_one(
 
-    # -----------------------------------------------------
-    # RESUME TEXT
-    # -----------------------------------------------------
+        {
+            "_id":
+                object_id
+        }
+
+    )
+
+
+# =========================================================
+# HELPER: CREATE UNIQUE FILE NAME
+# =========================================================
+
+def create_unique_filename(
+    original_filename
+):
+
+    extension = original_filename.rsplit(
+        ".",
+        1
+    )[-1].lower()
+
+
+    unique_filename = (
+
+        str(
+            uuid.uuid4()
+        )
+
+        + "."
+
+        + extension
+
+    )
+
+
+    return (
+
+        unique_filename,
+
+        extension
+
+    )
+
+
+# =========================================================
+# HELPER: GET RESUME TEXT
+# =========================================================
+
+def get_resume_text(
+    student
+):
+
+    if not isinstance(
+        student,
+        dict
+    ):
+
+        return ""
+
 
     resume = student.get(
         "resume",
         {}
     )
 
-    if isinstance(
+
+    if not isinstance(
         resume,
         dict
     ):
 
-        resume_text = resume.get(
-            "extracted_text",
-            ""
+        return ""
+
+
+    # =====================================================
+    # STRUCTURE 1
+    #
+    # resume.extracted_text
+    # =====================================================
+
+    extracted_text = resume.get(
+        "extracted_text",
+        ""
+    )
+
+
+    if extracted_text:
+
+        return str(
+            extracted_text
         )
 
-        if resume_text:
 
-            document_texts.append(
-                resume_text
+    # =====================================================
+    # STRUCTURE 2
+    #
+    # resume.file.extracted_text
+    # =====================================================
+
+    resume_file = resume.get(
+        "file",
+        {}
+    )
+
+
+    if isinstance(
+        resume_file,
+        dict
+    ):
+
+        return str(
+
+            resume_file.get(
+                "extracted_text",
+                ""
             )
 
-    # -----------------------------------------------------
-    # CERTIFICATE TEXT
-    # -----------------------------------------------------
+            or ""
 
-    certificates = student.get(
+        )
+
+
+    return ""
+
+
+# =========================================================
+# HELPER: GET CERTIFICATE TEXTS
+# =========================================================
+
+def get_certificate_texts(
+    student
+):
+
+    certificate_texts = []
+
+
+    if not isinstance(
+        student,
+        dict
+    ):
+
+        return certificate_texts
+
+
+    # =====================================================
+    # STRUCTURE 1
+    #
+    # certifications[]
+    # =====================================================
+
+    certifications = student.get(
+        "certifications",
+        []
+    )
+
+
+    if isinstance(
+        certifications,
+        list
+    ):
+
+        for certification in certifications:
+
+            if not isinstance(
+                certification,
+                dict
+            ):
+
+                continue
+
+
+            # ------------------------------------------------
+            # DIRECT TEXT
+            # ------------------------------------------------
+
+            direct_text = certification.get(
+                "extracted_text",
+                ""
+            )
+
+
+            if direct_text:
+
+                certificate_texts.append(
+                    str(
+                        direct_text
+                    )
+                )
+
+                continue
+
+
+            # ------------------------------------------------
+            # NESTED FILE TEXT
+            # ------------------------------------------------
+
+            certificate_file = certification.get(
+                "file",
+                {}
+            )
+
+
+            if isinstance(
+                certificate_file,
+                dict
+            ):
+
+                extracted_text = certificate_file.get(
+                    "extracted_text",
+                    ""
+                )
+
+
+                if extracted_text:
+
+                    certificate_texts.append(
+                        str(
+                            extracted_text
+                        )
+                    )
+
+
+    # =====================================================
+    # STRUCTURE 2
+    #
+    # uploaded_certificates[]
+    # =====================================================
+
+    uploaded_certificates = student.get(
         "uploaded_certificates",
         []
     )
 
+
     if isinstance(
-        certificates,
+        uploaded_certificates,
         list
     ):
 
-        for certificate in certificates:
+        for certificate in uploaded_certificates:
 
             if not isinstance(
                 certificate,
                 dict
             ):
+
                 continue
 
-            certificate_text = certificate.get(
+
+            extracted_text = certificate.get(
                 "extracted_text",
                 ""
             )
 
-            if certificate_text:
 
-                document_texts.append(
-                    certificate_text
+            if extracted_text:
+
+                certificate_texts.append(
+                    str(
+                        extracted_text
+                    )
                 )
 
-    return document_texts
+
+    return certificate_texts
+
+
+# =========================================================
+# HELPER: EXTRACT RESUME SKILLS
+# =========================================================
+
+def extract_resume_skills(
+    resume_text
+):
+
+    if not resume_text:
+
+        return empty_detected_skills()
+
+
+    try:
+
+        return extract_skills_from_documents(
+
+            resume_text=
+                resume_text,
+
+            certificate_texts=
+                []
+
+        )
+
+
+    except Exception as error:
+
+        print(
+            "Resume skill extraction error:",
+            error
+        )
+
+
+        return empty_detected_skills()
+
+
+# =========================================================
+# HELPER: EXTRACT CERTIFICATE SKILLS
+# =========================================================
+
+def extract_certificate_skills(
+    certificate_texts
+):
+
+    if not certificate_texts:
+
+        return empty_detected_skills()
+
+
+    try:
+
+        return extract_skills_from_documents(
+
+            resume_text=
+                "",
+
+            certificate_texts=
+                certificate_texts
+
+        )
+
+
+    except Exception as error:
+
+        print(
+            "Certificate skill extraction error:",
+            error
+        )
+
+
+        return empty_detected_skills()
 
 
 # =========================================================
 # HELPER: UPDATE COMBINED DETECTED SKILLS
 # =========================================================
 
-def update_combined_skills(object_id):
+def update_combined_skills(
+    object_id
+):
 
-    student = students_collection.find_one(
-        {
-            "_id": object_id
-        }
+    # =====================================================
+    # GET LATEST STUDENT DATA
+    # =====================================================
+
+    student = get_student(
+        object_id
     )
+
 
     if not student:
 
-        return {
-            "skills": [],
-            "categorized_skills": {},
-            "skill_details": [],
-            "document_count": 0
-        }
+        return empty_detected_skills()
 
-    # -----------------------------------------------------
-    # GET ALL EXTRACTED DOCUMENT TEXT
-    # -----------------------------------------------------
 
-    document_texts = get_all_document_text(
+    # =====================================================
+    # GET RESUME TEXT
+    # =====================================================
+
+    resume_text = get_resume_text(
         student
     )
 
-    resume_text = ""
 
-    certificate_texts = []
+    # =====================================================
+    # GET CERTIFICATE TEXTS
+    # =====================================================
 
-    resume = student.get(
-        "resume",
-        {}
+    certificate_texts = get_certificate_texts(
+        student
     )
 
-    if isinstance(
-        resume,
-        dict
-    ):
 
-        resume_text = resume.get(
-            "extracted_text",
-            ""
+    # =====================================================
+    # DEBUG OUTPUT
+    # =====================================================
+
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "DOCUMENT SKILL EXTRACTION STARTED"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "Resume text characters:",
+        len(
+            resume_text
+        )
+    )
+
+    print(
+        "Certificate documents:",
+        len(
+            certificate_texts
+        )
+    )
+
+    print(
+        "========================================\n"
+    )
+
+
+    # =====================================================
+    # EXTRACT RESUME SKILLS
+    # =====================================================
+
+    resume_result = extract_resume_skills(
+        resume_text
+    )
+
+
+    # =====================================================
+    # EXTRACT CERTIFICATE SKILLS
+    # =====================================================
+
+    certificate_result = extract_certificate_skills(
+        certificate_texts
+    )
+
+
+    # =====================================================
+    # EXTRACT ALL DOCUMENT SKILLS
+    # =====================================================
+
+    try:
+
+        combined_result = (
+            extract_skills_from_documents(
+
+                resume_text=
+                    resume_text,
+
+                certificate_texts=
+                    certificate_texts
+
+            )
         )
 
-    certificates = student.get(
-        "uploaded_certificates",
-        []
-    )
 
-    if isinstance(
-        certificates,
-        list
-    ):
+    except Exception as error:
 
-        for certificate in certificates:
+        print(
+            "Combined skill extraction error:",
+            error
+        )
 
-            if not isinstance(
-                certificate,
-                dict
-            ):
-                continue
 
-            certificate_text = certificate.get(
-                "extracted_text",
-                ""
+        combined_result = empty_detected_skills()
+
+
+    # =====================================================
+    # CANONICAL DETECTED SKILLS STRUCTURE
+    #
+    # IMPORTANT:
+    #
+    # This exact structure is expected by:
+    #
+    # services/llm_analyzer.py
+    # services/llm_worker.py
+    # =====================================================
+
+    detected_skills_data = {
+
+        "skills":
+            combined_result.get(
+                "skills",
+                []
+            ),
+
+        "categorized_skills":
+            combined_result.get(
+                "categorized_skills",
+                {}
+            ),
+
+        "skill_details":
+            combined_result.get(
+                "skill_details",
+                []
+            ),
+
+        "document_count":
+            combined_result.get(
+                "document_count",
+                0
             )
 
-            if certificate_text:
+    }
 
-                certificate_texts.append(
-                    certificate_text
-                )
 
-    # -----------------------------------------------------
-    # EXTRACT ALL DOCUMENT SKILLS
-    # -----------------------------------------------------
+    # =====================================================
+    # OPTIONAL SOURCE DETAILS
+    #
+    # Useful for debugging/dashboard display
+    # =====================================================
 
-    detected_skills_data = (
-        extract_skills_from_documents(
-            resume_text=resume_text,
-            certificate_texts=certificate_texts
-        )
-    )
+    detected_skills_sources = {
 
-    # -----------------------------------------------------
-    # SAVE COMBINED SKILLS
-    # -----------------------------------------------------
+        "resume_skills":
+
+            resume_result.get(
+                "skills",
+                []
+            ),
+
+        "certificate_skills":
+
+            certificate_result.get(
+                "skills",
+                []
+            )
+
+    }
+
+
+    # =====================================================
+    # SAVE DETECTED SKILLS
+    #
+    # PRIMARY LOCATION:
+    #
+    # llm_analysis.detected_skills
+    #
+    # This matches llm_analyzer.py and llm_worker.py
+    # =====================================================
 
     students_collection.update_one(
 
         {
-            "_id": object_id
+            "_id":
+                object_id
         },
 
         {
             "$set": {
 
                 "llm_analysis.detected_skills":
-                    detected_skills_data
+                    detected_skills_data,
+
+                "llm_analysis.detected_skill_sources":
+                    detected_skills_sources,
+
+                "updated_at":
+                    utc_now()
+
             }
         }
 
     )
+
+
+    # =====================================================
+    # TERMINAL OUTPUT
+    # =====================================================
+
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "DOCUMENT SKILL EXTRACTION COMPLETED"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "Documents analyzed:",
+        detected_skills_data.get(
+            "document_count",
+            0
+        )
+    )
+
+    print(
+        "Resume skills:"
+    )
+
+    print(
+        detected_skills_sources.get(
+            "resume_skills",
+            []
+        )
+    )
+
+    print(
+        "Certificate skills:"
+    )
+
+    print(
+        detected_skills_sources.get(
+            "certificate_skills",
+            []
+        )
+    )
+
+    print(
+        "All detected skills:"
+    )
+
+    print(
+        detected_skills_data.get(
+            "skills",
+            []
+        )
+    )
+
+    print(
+        "========================================\n"
+    )
+
 
     return detected_skills_data
 
@@ -309,19 +825,24 @@ def update_combined_skills(object_id):
 
 @upload_routes.route(
     "/resume/<student_id>",
-    methods=["POST"]
+    methods=[
+        "POST"
+    ]
 )
-def upload_resume(student_id):
+def upload_resume(
+    student_id
+):
 
-    # -----------------------------------------------------
+    # =====================================================
     # CHECK FILE
-    # -----------------------------------------------------
+    # =====================================================
 
     if "resume" not in request.files:
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Resume file is required"
@@ -338,7 +859,8 @@ def upload_resume(student_id):
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "No resume selected"
@@ -346,18 +868,22 @@ def upload_resume(student_id):
         }), 400
 
 
-    # -----------------------------------------------------
-    # VALIDATE EXTENSION
-    # -----------------------------------------------------
+    # =====================================================
+    # VALIDATE FILE TYPE
+    # =====================================================
 
     if not allowed_file(
+
         file.filename,
+
         ALLOWED_RESUME_EXTENSIONS
+
     ):
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Only PDF and DOCX files are allowed"
@@ -365,19 +891,21 @@ def upload_resume(student_id):
         }), 400
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # VALIDATE STUDENT ID
-    # -----------------------------------------------------
+    # =====================================================
 
     object_id = get_student_object_id(
         student_id
     )
 
+
     if not object_id:
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Invalid student ID"
@@ -385,19 +913,17 @@ def upload_resume(student_id):
         }), 400
 
 
-    student = students_collection.find_one({
-
-        "_id":
-            object_id
-
-    })
+    student = get_student(
+        object_id
+    )
 
 
     if not student:
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Student not found"
@@ -405,30 +931,19 @@ def upload_resume(student_id):
         }), 404
 
 
-    # -----------------------------------------------------
-    # GENERATE UNIQUE FILENAME
-    # -----------------------------------------------------
+    # =====================================================
+    # CREATE FILE NAME
+    # =====================================================
 
     original_filename = secure_filename(
         file.filename
     )
 
-    extension = original_filename.rsplit(
-        ".",
-        1
-    )[-1].lower()
 
-
-    unique_filename = (
-
-        str(
-            uuid.uuid4()
+    unique_filename, extension = (
+        create_unique_filename(
+            original_filename
         )
-
-        + "."
-
-        + extension
-
     )
 
 
@@ -441,157 +956,212 @@ def upload_resume(student_id):
     )
 
 
-    # -----------------------------------------------------
-    # SAVE FILE
-    # -----------------------------------------------------
+    try:
 
-    file.save(
-        filepath
-    )
+        # =================================================
+        # SAVE FILE
+        # =================================================
 
-
-    # -----------------------------------------------------
-    # EXTRACT TEXT
-    # -----------------------------------------------------
-
-    print(
-        "\n========================================"
-    )
-
-    print(
-        "EXTRACTING RESUME TEXT"
-    )
-
-    print(
-        "========================================"
-    )
-
-
-    resume_text = extract_text_from_file(
-        filepath
-    )
-
-
-    print(
-
-        "Resume text characters extracted:",
-
-        len(
-            resume_text
+        file.save(
+            filepath
         )
 
-    )
+
+        print(
+            "\n========================================"
+        )
+
+        print(
+            "EXTRACTING RESUME TEXT"
+        )
+
+        print(
+            "FILE:",
+            original_filename
+        )
+
+        print(
+            "========================================"
+        )
 
 
-    # -----------------------------------------------------
-    # CREATE RESUME DATA
-    # -----------------------------------------------------
+        # =================================================
+        # EXTRACT TEXT
+        # =================================================
 
-    resume_data = {
-
-        "has_resume":
-            True,
-
-        "resume_name":
-            original_filename,
-
-        "stored_filename":
-            unique_filename,
-
-        "file_path":
-            filepath,
-
-        "file_type":
-            extension,
-
-        "extracted_text":
-            resume_text
-
-    }
+        resume_text = extract_text_from_file(
+            filepath
+        ) or ""
 
 
-    # -----------------------------------------------------
-    # SAVE RESUME
-    # -----------------------------------------------------
+        print(
+            "Resume text characters extracted:",
+            len(
+                resume_text
+            )
+        )
 
-    students_collection.update_one(
 
-        {
+        # =================================================
+        # CREATE RESUME DATA
+        # =================================================
 
-            "_id":
-                object_id
+        resume_data = {
 
-        },
+            "has_resume":
+                True,
 
-        {
+            "resume_name":
+                original_filename,
 
-            "$set": {
+            "stored_filename":
+                unique_filename,
 
-                "resume":
-                    resume_data
+            "file_path":
+                filepath,
 
-            }
+            "file_type":
+                extension,
+
+            "extracted_text":
+                resume_text,
+
+            "uploaded_at":
+                utc_now()
 
         }
 
-    )
 
+        # =================================================
+        # SAVE TO MONGODB
+        # =================================================
 
-    # -----------------------------------------------------
-    # UPDATE ALL DOCUMENT SKILLS
-    # -----------------------------------------------------
+        students_collection.update_one(
 
-    detected_skills_data = (
-        update_combined_skills(
-            object_id
+            {
+                "_id":
+                    object_id
+            },
+
+            {
+                "$set": {
+
+                    "resume":
+                        resume_data,
+
+                    "updated_at":
+                        utc_now()
+
+                }
+            }
+
         )
-    )
 
 
-    print(
-        "Detected skills:"
-    )
+        # =================================================
+        # UPDATE DETECTED SKILLS
+        # =================================================
 
-    print(
-        detected_skills_data.get(
-            "skills",
-            []
+        detected_skills_data = (
+            update_combined_skills(
+                object_id
+            )
         )
-    )
 
 
-    # -----------------------------------------------------
-    # RESPONSE
-    # -----------------------------------------------------
+        # =================================================
+        # SUCCESS MESSAGE
+        # =================================================
 
-    return jsonify({
+        if resume_text.strip():
 
-        "success":
-            True,
+            message = (
 
-        "message":
-            "Resume uploaded and analyzed successfully",
+                "Resume uploaded successfully. "
+                "Text extracted and skills detected."
 
-        "resume": {
+            )
 
-            "original_name":
-                original_filename,
+        else:
 
-            "stored_name":
-                unique_filename,
+            message = (
 
-            "text_characters":
-                len(
-                    resume_text
+                "Resume uploaded successfully, but "
+                "no readable text could be extracted."
+
+            )
+
+
+        # =================================================
+        # RESPONSE
+        # =================================================
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "message":
+                message,
+
+            "resume": {
+
+                "original_name":
+                    original_filename,
+
+                "stored_name":
+                    unique_filename,
+
+                "text_characters":
+                    len(
+                        resume_text
+                    )
+
+            },
+
+            "detected_skills":
+                detected_skills_data
+
+        }), 200
+
+
+    except Exception as error:
+
+        print(
+            "Resume upload error:",
+            error
+        )
+
+
+        if os.path.exists(
+            filepath
+        ):
+
+            try:
+
+                os.remove(
+                    filepath
                 )
 
-        },
+            except Exception:
 
-        "detected_skills":
+                pass
 
-            detected_skills_data
 
-    }), 200
+        return jsonify({
+
+            "success":
+                False,
+
+            "message":
+                "Resume upload failed",
+
+            "error":
+                str(
+                    error
+                )
+
+        }), 500
 
 
 # =========================================================
@@ -600,19 +1170,24 @@ def upload_resume(student_id):
 
 @upload_routes.route(
     "/certificate/<student_id>",
-    methods=["POST"]
+    methods=[
+        "POST"
+    ]
 )
-def upload_certificate(student_id):
+def upload_certificate(
+    student_id
+):
 
-    # -----------------------------------------------------
+    # =====================================================
     # CHECK FILE
-    # -----------------------------------------------------
+    # =====================================================
 
     if "certificate" not in request.files:
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Certificate file is required"
@@ -629,7 +1204,8 @@ def upload_certificate(student_id):
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "No certificate selected"
@@ -637,9 +1213,9 @@ def upload_certificate(student_id):
         }), 400
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # VALIDATE FILE TYPE
-    # -----------------------------------------------------
+    # =====================================================
 
     if not allowed_file(
 
@@ -651,17 +1227,21 @@ def upload_certificate(student_id):
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
-                "Only PDF, JPG, JPEG and PNG files are allowed"
+                (
+                    "Only PDF, DOCX, JPG, JPEG "
+                    "and PNG files are allowed"
+                )
 
         }), 400
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # VALIDATE STUDENT ID
-    # -----------------------------------------------------
+    # =====================================================
 
     object_id = get_student_object_id(
         student_id
@@ -672,7 +1252,8 @@ def upload_certificate(student_id):
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Invalid student ID"
@@ -680,19 +1261,17 @@ def upload_certificate(student_id):
         }), 400
 
 
-    student = students_collection.find_one({
-
-        "_id":
-            object_id
-
-    })
+    student = get_student(
+        object_id
+    )
 
 
     if not student:
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "message":
                 "Student not found"
@@ -700,34 +1279,19 @@ def upload_certificate(student_id):
         }), 404
 
 
-    # -----------------------------------------------------
-    # UNIQUE FILENAME
-    # -----------------------------------------------------
+    # =====================================================
+    # CREATE FILE NAME
+    # =====================================================
 
     original_filename = secure_filename(
         file.filename
     )
 
 
-    extension = original_filename.rsplit(
-
-        ".",
-
-        1
-
-    )[-1].lower()
-
-
-    unique_filename = (
-
-        str(
-            uuid.uuid4()
+    unique_filename, extension = (
+        create_unique_filename(
+            original_filename
         )
-
-        + "."
-
-        + extension
-
     )
 
 
@@ -740,154 +1304,217 @@ def upload_certificate(student_id):
     )
 
 
-    # -----------------------------------------------------
-    # SAVE FILE
-    # -----------------------------------------------------
+    try:
 
-    file.save(
-        filepath
-    )
+        # =================================================
+        # SAVE FILE
+        # =================================================
 
-
-    # -----------------------------------------------------
-    # EXTRACT TEXT / OCR
-    # -----------------------------------------------------
-
-    print(
-        "\n========================================"
-    )
-
-    print(
-        "EXTRACTING CERTIFICATE TEXT"
-    )
-
-    print(
-        "========================================"
-    )
-
-
-    certificate_text = (
-        extract_text_from_file(
+        file.save(
             filepath
         )
-    )
 
 
-    print(
-
-        "Certificate text characters extracted:",
-
-        len(
-            certificate_text
+        print(
+            "\n========================================"
         )
 
-    )
-
-
-    # -----------------------------------------------------
-    # CERTIFICATE DATA
-    # -----------------------------------------------------
-
-    certificate_data = {
-
-        "original_name":
-            original_filename,
-
-        "stored_filename":
-            unique_filename,
-
-        "file_path":
-            filepath,
-
-        "file_type":
-            extension,
-
-        "extracted_text":
-            certificate_text
-
-    }
-
-
-    # -----------------------------------------------------
-    # SAVE CERTIFICATE
-    # -----------------------------------------------------
-
-    students_collection.update_one(
-
-        {
-
-            "_id":
-                object_id
-
-        },
-
-        {
-
-            "$push": {
-
-                "uploaded_certificates":
-
-                    certificate_data
-
-            }
-
-        }
-
-    )
-
-
-    # -----------------------------------------------------
-    # UPDATE ALL DOCUMENT SKILLS
-    # -----------------------------------------------------
-
-    detected_skills_data = (
-        update_combined_skills(
-            object_id
+        print(
+            "EXTRACTING CERTIFICATE TEXT"
         )
-    )
 
-
-    print(
-        "Detected skills:"
-    )
-
-    print(
-        detected_skills_data.get(
-            "skills",
-            []
+        print(
+            "FILE:",
+            original_filename
         )
-    )
+
+        print(
+            "========================================"
+        )
 
 
-    # -----------------------------------------------------
-    # RESPONSE
-    # -----------------------------------------------------
+        # =================================================
+        # EXTRACT TEXT / OCR
+        # =================================================
 
-    return jsonify({
+        certificate_text = (
 
-        "success":
-            True,
+            extract_text_from_file(
+                filepath
+            )
 
-        "message":
-            "Certificate uploaded and analyzed successfully",
+            or ""
 
-        "certificate": {
+        )
+
+
+        print(
+            "Certificate text characters extracted:",
+            len(
+                certificate_text
+            )
+        )
+
+
+        # =================================================
+        # CREATE CERTIFICATE DATA
+        # =================================================
+
+        certificate_data = {
 
             "original_name":
                 original_filename,
 
-            "stored_name":
+            "stored_filename":
                 unique_filename,
 
-            "text_characters":
-                len(
-                    certificate_text
+            "file_path":
+                filepath,
+
+            "file_type":
+                extension,
+
+            "extracted_text":
+                certificate_text,
+
+            "uploaded_at":
+                utc_now()
+
+        }
+
+
+        # =================================================
+        # SAVE CERTIFICATE
+        # =================================================
+
+        students_collection.update_one(
+
+            {
+                "_id":
+                    object_id
+            },
+
+            {
+                "$push": {
+
+                    "uploaded_certificates":
+                        certificate_data
+
+                },
+
+                "$set": {
+
+                    "updated_at":
+                        utc_now()
+
+                }
+
+            }
+
+        )
+
+
+        # =================================================
+        # UPDATE DETECTED SKILLS
+        # =================================================
+
+        detected_skills_data = (
+            update_combined_skills(
+                object_id
+            )
+        )
+
+
+        # =================================================
+        # SUCCESS MESSAGE
+        # =================================================
+
+        if certificate_text.strip():
+
+            message = (
+
+                "Certificate uploaded successfully. "
+                "Text extracted and skills detected."
+
+            )
+
+        else:
+
+            message = (
+
+                "Certificate uploaded successfully, "
+                "but no readable text could be extracted."
+
+            )
+
+
+        # =================================================
+        # RESPONSE
+        # =================================================
+
+        return jsonify({
+
+            "success":
+                True,
+
+            "message":
+                message,
+
+            "certificate": {
+
+                "original_name":
+                    original_filename,
+
+                "stored_name":
+                    unique_filename,
+
+                "text_characters":
+                    len(
+                        certificate_text
+                    )
+
+            },
+
+            "detected_skills":
+                detected_skills_data
+
+        }), 200
+
+
+    except Exception as error:
+
+        print(
+            "Certificate upload error:",
+            error
+        )
+
+
+        if os.path.exists(
+            filepath
+        ):
+
+            try:
+
+                os.remove(
+                    filepath
                 )
 
-        },
+            except Exception:
 
-        "detected_skills":
+                pass
 
-            detected_skills_data
 
-    }), 200
+        return jsonify({
+
+            "success":
+                False,
+
+            "message":
+                "Certificate upload failed",
+
+            "error":
+                str(
+                    error
+                )
+
+        }), 500

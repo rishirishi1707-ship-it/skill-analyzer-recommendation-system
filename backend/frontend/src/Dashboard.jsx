@@ -6,34 +6,351 @@ function Dashboard({ onLogout }) {
     // =========================================================
 
     const [student, setStudent] = useState(null);
+
     const [activeSection, setActiveSection] =
         useState("overview");
 
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] =
+        useState(true);
+
+    // Job recommendation state
+    const [recommendations, setRecommendations] =
+        useState([]);
+
+    const [recommendationLoading, setRecommendationLoading] =
+        useState(false);
+
+    const [recommendationError, setRecommendationError] =
+        useState("");
 
     // =========================================================
     // LOAD STUDENT DATA
     // =========================================================
 
     useEffect(() => {
-        try {
-            const storedStudent =
-                localStorage.getItem("student");
+        const loadStudentProfile = async () => {
+            try {
+                // Get the JWT token
+                const token =
+                    localStorage.getItem("token");
 
-            if (storedStudent) {
-                setStudent(
-                    JSON.parse(storedStudent)
+                if (!token) {
+                    console.error(
+                        "JWT token not found."
+                    );
+
+                    setLoading(false);
+                    return;
+                }
+
+                // Get the basic student information
+                const storedStudent =
+                    localStorage.getItem("student");
+
+                let basicStudent = null;
+
+                if (storedStudent) {
+                    try {
+                        basicStudent =
+                            JSON.parse(
+                                storedStudent
+                            );
+                    } catch (error) {
+                        console.error(
+                            "Invalid student data in localStorage:",
+                            error
+                        );
+                    }
+                }
+
+                // -------------------------------------------------
+                // FETCH COMPLETE PROFILE FROM BACKEND
+                // -------------------------------------------------
+
+                const response = await fetch(
+                    "http://127.0.0.1:5000/api/students/profile",
+                    {
+                        method: "GET",
+
+                        headers: {
+                            Authorization:
+                                `Bearer ${token}`,
+
+                            "Content-Type":
+                                "application/json",
+                        },
+                    }
+                );
+
+                const data =
+                    await response.json();
+
+                console.log(
+                    "COMPLETE STUDENT PROFILE:",
+                    data
+                );
+
+                // -------------------------------------------------
+                // HANDLE AUTH ERROR
+                // -------------------------------------------------
+
+                if (response.status === 401) {
+                    console.error(
+                        "JWT authentication failed:",
+                        data
+                    );
+
+                    setStudent(
+                        basicStudent
+                    );
+
+                    setLoading(false);
+                    return;
+                }
+
+                // -------------------------------------------------
+                // HANDLE OTHER ERRORS
+                // -------------------------------------------------
+
+                if (!response.ok) {
+                    console.error(
+                        "Profile API error:",
+                        data
+                    );
+
+                    setStudent(
+                        basicStudent
+                    );
+
+                    setLoading(false);
+                    return;
+                }
+
+                // -------------------------------------------------
+                // GET PROFILE FROM RESPONSE
+                // -------------------------------------------------
+
+                const completeStudent =
+                    data?.student ||
+                    data?.profile ||
+                    data?.data ||
+                    data;
+
+                if (
+                    completeStudent &&
+                    typeof completeStudent ===
+                    "object"
+                ) {
+                    // Save complete profile in React state
+                    setStudent(
+                        completeStudent
+                    );
+
+                    // Update localStorage too
+                    localStorage.setItem(
+                        "student",
+                        JSON.stringify(
+                            completeStudent
+                        )
+                    );
+
+                    console.log(
+                        "Updated student profile:",
+                        completeStudent
+                    );
+
+                    console.log(
+                        "Detected skills:",
+                        completeStudent
+                            ?.detected_skills
+                    );
+                } else {
+                    setStudent(
+                        basicStudent
+                    );
+                }
+
+            } catch (error) {
+                console.error(
+                    "Unable to load complete student profile:",
+                    error
+                );
+
+                // Fallback to existing localStorage data
+                try {
+                    const storedStudent =
+                        localStorage.getItem(
+                            "student"
+                        );
+
+                    if (storedStudent) {
+                        setStudent(
+                            JSON.parse(
+                                storedStudent
+                            )
+                        );
+                    }
+                } catch (storageError) {
+                    console.error(
+                        "Unable to read stored student:",
+                        storageError
+                    );
+                }
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadStudentProfile();
+    }, []);
+
+    // =========================================================
+    // LOAD JOB RECOMMENDATIONS
+    // =========================================================
+
+    useEffect(() => {
+        if (activeSection !== "recommendations") {
+            return;
+        }
+
+        fetchRecommendations();
+    }, [activeSection]);
+
+    // =========================================================
+    // FETCH JOB RECOMMENDATIONS
+    // =========================================================
+
+    const fetchRecommendations = async () => {
+        setRecommendationLoading(true);
+        setRecommendationError("");
+
+        try {
+            // -------------------------------------------------
+            // GET JWT TOKEN
+            // -------------------------------------------------
+
+            const token =
+                localStorage.getItem("token");
+
+            if (!token) {
+                setRecommendationError(
+                    "Login token not found. Please login again."
+                );
+
+                setRecommendations([]);
+
+                return;
+            }
+
+            // -------------------------------------------------
+            // CALL BACKEND
+            // -------------------------------------------------
+
+            const response = await fetch(
+                "http://127.0.0.1:5000/api/students/job-recommendations",
+                {
+                    method: "GET",
+
+                    headers: {
+                        Authorization:
+                            `Bearer ${token}`,
+
+                        "Content-Type":
+                            "application/json",
+                    },
+                }
+            );
+
+            // -------------------------------------------------
+            // READ RESPONSE
+            // -------------------------------------------------
+
+            let data = {};
+
+            try {
+                data = await response.json();
+            } catch (jsonError) {
+                console.error(
+                    "Unable to parse API response:",
+                    jsonError
                 );
             }
+
+            console.log(
+                "JOB RECOMMENDATIONS RESPONSE:",
+                data
+            );
+
+            // -------------------------------------------------
+            // AUTHORIZATION ERROR
+            // -------------------------------------------------
+
+            if (response.status === 401) {
+                setRecommendations([]);
+
+                setRecommendationError(
+                    data?.message ||
+                    "Your login session has expired. Please login again."
+                );
+
+                return;
+            }
+
+            // -------------------------------------------------
+            // OTHER API ERROR
+            // -------------------------------------------------
+
+            if (!response.ok) {
+                setRecommendations([]);
+
+                setRecommendationError(
+                    data?.message ||
+                    "Unable to load job recommendations."
+                );
+
+                return;
+            }
+
+            // -------------------------------------------------
+            // SUCCESS
+            // -------------------------------------------------
+
+            if (
+                data?.success &&
+                Array.isArray(
+                    data?.recommendations
+                )
+            ) {
+                setRecommendations(
+                    data.recommendations
+                );
+
+                setRecommendationError("");
+            } else {
+                setRecommendations([]);
+
+                setRecommendationError(
+                    data?.message ||
+                    "No job recommendations were returned."
+                );
+            }
+
         } catch (error) {
             console.error(
-                "Unable to load student data:",
+                "Recommendation API error:",
                 error
             );
+
+            setRecommendations([]);
+
+            setRecommendationError(
+                "Unable to connect to the backend. Make sure Flask is running."
+            );
+
         } finally {
-            setLoading(false);
+            setRecommendationLoading(false);
         }
-    }, []);
+    };
 
     // =========================================================
     // LOGOUT
@@ -45,6 +362,7 @@ function Dashboard({ onLogout }) {
         } else {
             localStorage.removeItem("token");
             localStorage.removeItem("student");
+
             window.location.reload();
         }
     };
@@ -79,6 +397,7 @@ function Dashboard({ onLogout }) {
 
     const studentName =
         student?.full_name ||
+        student?.personal?.full_name ||
         student?.name ||
         "Student";
 
@@ -92,37 +411,71 @@ function Dashboard({ onLogout }) {
     const academic =
         student?.academic || {};
 
+    // =========================================================
+    // SKILLS
+    // =========================================================
+
     const skills =
-        student?.skills || [];
+        Array.isArray(student?.skills)
+            ? student.skills
+            : [];
+
+    const detectedSkills =
+        Array.isArray(
+            student?.detected_skills?.all
+        )
+            ? student.detected_skills.all
+            : [];
+
+    // =========================================================
+    // CERTIFICATIONS
+    // =========================================================
 
     const certifications =
-        student?.certifications || [];
+        Array.isArray(
+            student?.certifications
+        )
+            ? student.certifications
+            : [];
+
+    // =========================================================
+    // PROJECTS
+    // =========================================================
 
     const projects =
-        student?.projects || [];
+        Array.isArray(student?.projects)
+            ? student.projects
+            : [];
+
+    // =========================================================
+    // CAREER
+    // =========================================================
 
     const career =
         student?.career_preferences ||
         {};
 
     // =========================================================
+    // PERSONAL DATA
+    // =========================================================
+
+    const personal =
+        student?.personal || {};
+
+    // =========================================================
     // DASHBOARD DATA
     // =========================================================
 
     const skillCount =
-        Array.isArray(skills)
+        skills.length > 0
             ? skills.length
-            : 0;
+            : detectedSkills.length;
 
     const projectCount =
-        Array.isArray(projects)
-            ? projects.length
-            : 0;
+        projects.length;
 
     const certificationCount =
-        Array.isArray(certifications)
-            ? certifications.length
-            : 0;
+        certifications.length;
 
     // =========================================================
     // NAVIGATION
@@ -230,8 +583,8 @@ function Dashboard({ onLogout }) {
         <div style={pageStyle}>
 
             {/* =====================================================
-          SIDEBAR
-      ===================================================== */}
+                SIDEBAR
+            ===================================================== */}
 
             <aside style={sidebarStyle}>
 
@@ -330,14 +683,14 @@ function Dashboard({ onLogout }) {
             </aside>
 
             {/* =====================================================
-          MAIN CONTENT
-      ===================================================== */}
+                MAIN CONTENT
+            ===================================================== */}
 
             <main style={mainStyle}>
 
                 {/* ===================================================
-            TOP BAR
-        =================================================== */}
+                    TOP BAR
+                =================================================== */}
 
                 <div
                     style={{
@@ -392,14 +745,15 @@ function Dashboard({ onLogout }) {
                     >
                         🎓{" "}
                         {student?.degree ||
+                            personal?.degree ||
                             "Student"}
                     </div>
 
                 </div>
 
                 {/* ===================================================
-            OVERVIEW
-        =================================================== */}
+                    OVERVIEW
+                =================================================== */}
 
                 {activeSection ===
                     "overview" && (
@@ -515,28 +869,32 @@ function Dashboard({ onLogout }) {
                                     <InfoRow
                                         label="Email"
                                         value={
-                                            student?.email
+                                            student?.email ||
+                                            personal?.email
                                         }
                                     />
 
                                     <InfoRow
                                         label="Register Number"
                                         value={
-                                            student?.register_number
+                                            student?.register_number ||
+                                            personal?.register_number
                                         }
                                     />
 
                                     <InfoRow
                                         label="Department"
                                         value={
-                                            student?.department
+                                            student?.department ||
+                                            personal?.department
                                         }
                                     />
 
                                     <InfoRow
                                         label="Year"
                                         value={
-                                            student?.year_of_study
+                                            student?.year_of_study ||
+                                            personal?.year_of_study
                                         }
                                     />
                                 </div>
@@ -589,8 +947,8 @@ function Dashboard({ onLogout }) {
                     )}
 
                 {/* ===================================================
-            PROFILE
-        =================================================== */}
+                    PROFILE
+                =================================================== */}
 
                 {activeSection ===
                     "profile" && (
@@ -600,84 +958,96 @@ function Dashboard({ onLogout }) {
                             <InfoRow
                                 label="Full Name"
                                 value={
-                                    student?.full_name
+                                    student?.full_name ||
+                                    personal?.full_name
                                 }
                             />
 
                             <InfoRow
                                 label="Register Number"
                                 value={
-                                    student?.register_number
+                                    student?.register_number ||
+                                    personal?.register_number
                                 }
                             />
 
                             <InfoRow
                                 label="Roll Number"
                                 value={
-                                    student?.roll_number
+                                    student?.roll_number ||
+                                    personal?.roll_number
                                 }
                             />
 
                             <InfoRow
                                 label="Email"
                                 value={
-                                    student?.email
+                                    student?.email ||
+                                    personal?.email
                                 }
                             />
 
                             <InfoRow
                                 label="Mobile"
                                 value={
-                                    student?.mobile
+                                    student?.mobile ||
+                                    personal?.mobile
                                 }
                             />
 
                             <InfoRow
                                 label="Gender"
                                 value={
-                                    student?.gender
+                                    student?.gender ||
+                                    personal?.gender
                                 }
                             />
 
                             <InfoRow
                                 label="Date of Birth"
                                 value={
-                                    student?.date_of_birth
+                                    student?.date_of_birth ||
+                                    personal?.date_of_birth
                                 }
                             />
 
                             <InfoRow
                                 label="Department"
                                 value={
-                                    student?.department
+                                    student?.department ||
+                                    personal?.department
                                 }
                             />
 
                             <InfoRow
                                 label="Degree"
                                 value={
-                                    student?.degree
+                                    student?.degree ||
+                                    personal?.degree
                                 }
                             />
 
                             <InfoRow
                                 label="Year of Study"
                                 value={
-                                    student?.year_of_study
+                                    student?.year_of_study ||
+                                    personal?.year_of_study
                                 }
                             />
 
                             <InfoRow
                                 label="Section"
                                 value={
-                                    student?.section
+                                    student?.section ||
+                                    personal?.section
                                 }
                             />
 
                             <InfoRow
                                 label="Semester"
                                 value={
-                                    student?.semester
+                                    student?.semester ||
+                                    personal?.semester
                                 }
                             />
 
@@ -720,6 +1090,27 @@ function Dashboard({ onLogout }) {
                             />
 
                             <InfoRow
+                                label="10th Percentage"
+                                value={
+                                    academic?.tenth_percentage
+                                }
+                            />
+
+                            <InfoRow
+                                label="12th Percentage"
+                                value={
+                                    academic?.twelfth_percentage
+                                }
+                            />
+
+                            <InfoRow
+                                label="Number of Arrears"
+                                value={
+                                    academic?.number_of_arrears
+                                }
+                            />
+
+                            <InfoRow
                                 label="Academic Year"
                                 value={
                                     academic?.academic_year
@@ -736,14 +1127,21 @@ function Dashboard({ onLogout }) {
                     )}
 
                 {/* ===================================================
-            SKILLS
-        =================================================== */}
+                    SKILLS
+                =================================================== */}
 
                 {activeSection ===
                     "skills" && (
                         <SectionCard
                             title="💻 My Skills"
                         >
+
+                            {/* MANUAL SKILLS */}
+
+                            <h3>
+                                ✨ Added Skills
+                            </h3>
+
                             {skills.length ===
                                 0 ? (
                                 <EmptyState
@@ -757,6 +1155,8 @@ function Dashboard({ onLogout }) {
                                         gridTemplateColumns:
                                             "repeat(auto-fit,minmax(220px,1fr))",
                                         gap: "15px",
+                                        marginBottom:
+                                            "30px",
                                     }}
                                 >
                                     {skills.map(
@@ -787,46 +1187,78 @@ function Dashboard({ onLogout }) {
                                                             "#4f46e5",
                                                     }}
                                                 >
-                                                    {skill.name ||
+                                                    {typeof skill ===
+                                                        "string"
+                                                        ? skill
+                                                        : skill.name ||
                                                         "Skill"}
                                                 </h3>
 
-                                                <p
-                                                    style={{
-                                                        margin:
-                                                            "4px 0",
-                                                        color:
-                                                            "#6b7280",
-                                                    }}
-                                                >
-                                                    Category:{" "}
-                                                    {skill.category ||
-                                                        "N/A"}
-                                                </p>
+                                                {typeof skill !==
+                                                    "string" && (
+                                                        <>
+                                                            <p
+                                                                style={{
+                                                                    margin:
+                                                                        "4px 0",
+                                                                    color:
+                                                                        "#6b7280",
+                                                                }}
+                                                            >
+                                                                Category:{" "}
+                                                                {skill.category ||
+                                                                    "N/A"}
+                                                            </p>
 
-                                                <p
-                                                    style={{
-                                                        margin:
-                                                            "4px 0",
-                                                        fontWeight:
-                                                            "700",
-                                                    }}
-                                                >
-                                                    Level:{" "}
-                                                    {skill.proficiency ||
-                                                        "N/A"}
-                                                </p>
+                                                            <p
+                                                                style={{
+                                                                    margin:
+                                                                        "4px 0",
+                                                                    fontWeight:
+                                                                        "700",
+                                                                }}
+                                                            >
+                                                                Level:{" "}
+                                                                {skill.proficiency ||
+                                                                    "N/A"}
+                                                            </p>
+                                                        </>
+                                                    )}
                                             </div>
                                         )
                                     )}
                                 </div>
                             )}
+
+                            {/* DETECTED SKILLS */}
+
+                            <h3>
+                                🤖 Skills Detected From Documents
+                            </h3>
+
+                            {detectedSkills.length ===
+                                0 ? (
+                                <EmptyState
+                                    text="No skills have been detected from your uploaded documents."
+                                />
+                            ) : (
+                                <SkillList
+                                    title="Automatically Detected Skills"
+                                    skills={
+                                        detectedSkills
+                                    }
+                                    emptyText="No detected skills."
+                                    background="#eff6ff"
+                                    border="#bfdbfe"
+                                    textColor="#1d4ed8"
+                                />
+                            )}
                         </SectionCard>
                     )}
 
                 {/* ===================================================
-            PROJECTS
-        =================================================== */}
+                    PROJECTS
+                =================================================== */}
 
                 {activeSection ===
                     "projects" && (
@@ -876,7 +1308,13 @@ function Dashboard({ onLogout }) {
                                             <InfoRow
                                                 label="Technologies"
                                                 value={
-                                                    project.technologies
+                                                    Array.isArray(
+                                                        project.technologies
+                                                    )
+                                                        ? project.technologies.join(
+                                                            ", "
+                                                        )
+                                                        : project.technologies
                                                 }
                                             />
 
@@ -907,8 +1345,8 @@ function Dashboard({ onLogout }) {
                     )}
 
                 {/* ===================================================
-            CERTIFICATIONS
-        =================================================== */}
+                    CERTIFICATIONS
+                =================================================== */}
 
                 {activeSection ===
                     "certifications" && (
@@ -986,8 +1424,8 @@ function Dashboard({ onLogout }) {
                     )}
 
                 {/* ===================================================
-            CAREER
-        =================================================== */}
+                    CAREER
+                =================================================== */}
 
                 {activeSection ===
                     "career" && (
@@ -1071,27 +1509,37 @@ function Dashboard({ onLogout }) {
                     )}
 
                 {/* ===================================================
-            RECOMMENDATIONS
-        =================================================== */}
+                    RECOMMENDATIONS
+                =================================================== */}
 
                 {activeSection ===
                     "recommendations" && (
                         <SectionCard
                             title="✨ Personalized Recommendations"
                         >
+
+                            {/* -------------------------------------------------
+                                HEADER
+                            ------------------------------------------------- */}
+
                             <div
                                 style={{
                                     padding:
-                                        "20px",
+                                        "22px",
                                     background:
-                                        "#eef2ff",
+                                        "linear-gradient(135deg,#eef2ff,#f5f3ff)",
                                     borderRadius:
                                         "14px",
                                     marginBottom:
-                                        "20px",
+                                        "25px",
                                 }}
                             >
-                                <h3>
+                                <h3
+                                    style={{
+                                        marginTop: 0,
+                                        color: "#312e81",
+                                    }}
+                                >
                                     🎯 Career Recommendation
                                 </h3>
 
@@ -1099,77 +1547,1252 @@ function Dashboard({ onLogout }) {
                                     style={{
                                         lineHeight:
                                             1.6,
+                                        marginBottom: 0,
                                     }}
                                 >
-                                    Based on your skills,
-                                    academic background
-                                    and career preferences,
-                                    personalized career
-                                    recommendations will
-                                    appear here.
+                                    Your recommendations
+                                    are calculated using
+                                    your skills, academic
+                                    eligibility, career
+                                    preferences and job
+                                    requirements.
                                 </p>
+
+                                {recommendations.length >
+                                    0 && (
+                                        <div
+                                            style={{
+                                                marginTop:
+                                                    "15px",
+                                                display:
+                                                    "inline-block",
+                                                padding:
+                                                    "8px 13px",
+                                                background:
+                                                    "white",
+                                                borderRadius:
+                                                    "20px",
+                                                color:
+                                                    "#4338ca",
+                                                fontWeight:
+                                                    "700",
+                                                fontSize:
+                                                    "13px",
+                                            }}
+                                        >
+                                            🎯{" "}
+                                            {
+                                                recommendations.length
+                                            } suitable job
+                                            {recommendations.length !==
+                                                1
+                                                ? "s"
+                                                : ""}{" "}
+                                            found
+                                        </div>
+                                    )}
                             </div>
+
+                            {/* -------------------------------------------------
+                                LEARNING RECOMMENDATION
+                            ------------------------------------------------- */}
 
                             <div
                                 style={{
                                     padding:
-                                        "20px",
+                                        "22px",
                                     background:
                                         "#f0fdf4",
                                     borderRadius:
                                         "14px",
                                     marginBottom:
-                                        "20px",
+                                        "25px",
                                 }}
                             >
-                                <h3>
+                                <h3
+                                    style={{
+                                        marginTop: 0,
+                                        color: "#166534",
+                                    }}
+                                >
                                     📚 Learning Recommendation
                                 </h3>
 
-                                <p
-                                    style={{
-                                        lineHeight:
-                                            1.6,
-                                    }}
-                                >
-                                    Your learning roadmap
-                                    will be generated based
-                                    on your current skills
-                                    and learning goals.
-                                </p>
+                                {recommendationLoading ? (
+                                    <p>
+                                        Analyzing your
+                                        skills and job
+                                        requirements...
+                                    </p>
+                                ) : recommendations.length ===
+                                    0 ? (
+                                    <p
+                                        style={{
+                                            lineHeight: 1.6,
+                                        }}
+                                    >
+                                        Missing-skill
+                                        recommendations
+                                        will appear when
+                                        suitable jobs are
+                                        found.
+                                    </p>
+                                ) : (
+                                    <LearningSummary
+                                        recommendations={
+                                            recommendations
+                                        }
+                                    />
+                                )}
                             </div>
+
+                            {/* -------------------------------------------------
+                                JOB ROLE RECOMMENDATION
+                            ------------------------------------------------- */}
 
                             <div
                                 style={{
                                     padding:
-                                        "20px",
+                                        "22px",
                                     background:
                                         "#fff7ed",
                                     borderRadius:
                                         "14px",
                                 }}
                             >
-                                <h3>
-                                    💼 Job Role Recommendation
-                                </h3>
-
-                                <p
+                                <div
                                     style={{
-                                        lineHeight:
-                                            1.6,
+                                        display: "flex",
+                                        justifyContent:
+                                            "space-between",
+                                        alignItems:
+                                            "center",
+                                        gap: "15px",
+                                        flexWrap:
+                                            "wrap",
+                                        marginBottom:
+                                            "20px",
                                     }}
                                 >
-                                    Job-role recommendations
-                                    will be displayed here
-                                    after the recommendation
-                                    engine is connected.
-                                </p>
+                                    <h3
+                                        style={{
+                                            margin: 0,
+                                            color:
+                                                "#9a3412",
+                                        }}
+                                    >
+                                        💼 Job Role
+                                        Recommendation
+                                    </h3>
+
+                                    <button
+                                        type="button"
+                                        onClick={
+                                            fetchRecommendations
+                                        }
+                                        disabled={
+                                            recommendationLoading
+                                        }
+                                        style={{
+                                            border:
+                                                "none",
+                                            background:
+                                                recommendationLoading
+                                                    ? "#fdba74"
+                                                    : "#f97316",
+                                            color:
+                                                "white",
+                                            padding:
+                                                "10px 16px",
+                                            borderRadius:
+                                                "9px",
+                                            cursor:
+                                                recommendationLoading
+                                                    ? "not-allowed"
+                                                    : "pointer",
+                                            fontWeight:
+                                                "700",
+                                        }}
+                                    >
+                                        {recommendationLoading
+                                            ? "Loading..."
+                                            : "🔄 Refresh"}
+                                    </button>
+                                </div>
+
+                                {/* -------------------------------------------------
+                                    LOADING
+                                ------------------------------------------------- */}
+
+                                {recommendationLoading && (
+                                    <div
+                                        style={{
+                                            padding:
+                                                "30px",
+                                            textAlign:
+                                                "center",
+                                            background:
+                                                "white",
+                                            borderRadius:
+                                                "12px",
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                fontSize:
+                                                    "35px",
+                                                marginBottom:
+                                                    "10px",
+                                            }}
+                                        >
+                                            🔎
+                                        </div>
+
+                                        <h3>
+                                            Finding the
+                                            best jobs for
+                                            you...
+                                        </h3>
+
+                                        <p
+                                            style={{
+                                                color:
+                                                    "#6b7280",
+                                            }}
+                                        >
+                                            Checking your
+                                            eligibility,
+                                            skills and
+                                            career
+                                            preferences.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* -------------------------------------------------
+                                    ERROR
+                                ------------------------------------------------- */}
+
+                                {!recommendationLoading &&
+                                    recommendationError && (
+                                        <div
+                                            style={{
+                                                padding:
+                                                    "20px",
+                                                background:
+                                                    "#fef2f2",
+                                                border:
+                                                    "1px solid #fecaca",
+                                                borderRadius:
+                                                    "12px",
+                                                color:
+                                                    "#991b1b",
+                                            }}
+                                        >
+                                            <h3
+                                                style={{
+                                                    marginTop: 0,
+                                                }}
+                                            >
+                                                ⚠️ Unable to
+                                                load
+                                                recommendations
+                                            </h3>
+
+                                            <p
+                                                style={{
+                                                    lineHeight:
+                                                        1.6,
+                                                }}
+                                            >
+                                                {
+                                                    recommendationError
+                                                }
+                                            </p>
+
+                                            <button
+                                                type="button"
+                                                onClick={
+                                                    fetchRecommendations
+                                                }
+                                                style={{
+                                                    border:
+                                                        "none",
+                                                    background:
+                                                        "#991b1b",
+                                                    color:
+                                                        "white",
+                                                    padding:
+                                                        "10px 15px",
+                                                    borderRadius:
+                                                        "8px",
+                                                    cursor:
+                                                        "pointer",
+                                                    fontWeight:
+                                                        "700",
+                                                }}
+                                            >
+                                                🔄 Try Again
+                                            </button>
+                                        </div>
+                                    )}
+
+                                {/* -------------------------------------------------
+                                    NO RESULTS
+                                ------------------------------------------------- */}
+
+                                {!recommendationLoading &&
+                                    !recommendationError &&
+                                    recommendations.length ===
+                                    0 && (
+                                        <div
+                                            style={{
+                                                padding:
+                                                    "35px 20px",
+                                                textAlign:
+                                                    "center",
+                                                background:
+                                                    "white",
+                                                borderRadius:
+                                                    "12px",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    fontSize:
+                                                        "40px",
+                                                    marginBottom:
+                                                        "10px",
+                                                }}
+                                            >
+                                                📭
+                                            </div>
+
+                                            <h3>
+                                                No eligible
+                                                jobs found
+                                            </h3>
+
+                                            <p
+                                                style={{
+                                                    color:
+                                                        "#6b7280",
+                                                    lineHeight:
+                                                        1.6,
+                                                }}
+                                            >
+                                                We could not
+                                                find a job
+                                                matching your
+                                                current
+                                                eligibility
+                                                requirements.
+                                            </p>
+
+                                            <p
+                                                style={{
+                                                    color:
+                                                        "#6b7280",
+                                                }}
+                                            >
+                                                Try updating
+                                                your skills,
+                                                CGPA, career
+                                                preferences
+                                                or academic
+                                                information.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                {/* -------------------------------------------------
+                                    RECOMMENDED JOBS
+                                ------------------------------------------------- */}
+
+                                {!recommendationLoading &&
+                                    recommendations.length >
+                                    0 && (
+                                        <div
+                                            style={{
+                                                display:
+                                                    "grid",
+                                                gap:
+                                                    "18px",
+                                            }}
+                                        >
+                                            {recommendations.map(
+                                                (
+                                                    job,
+                                                    index
+                                                ) => (
+                                                    <JobRecommendationCard
+                                                        key={
+                                                            job.job_id ||
+                                                            index
+                                                        }
+                                                        job={
+                                                            job
+                                                        }
+                                                        index={
+                                                            index
+                                                        }
+                                                    />
+                                                )
+                                            )}
+                                        </div>
+                                    )}
                             </div>
+
                         </SectionCard>
                     )}
 
             </main>
 
+        </div>
+    );
+}
+
+// =============================================================
+// JOB RECOMMENDATION CARD
+// =============================================================
+
+function JobRecommendationCard({
+    job,
+    index,
+}) {
+    const finalScore =
+        Number(
+            job?.final_score
+        ) || 0;
+
+    const skillMatch =
+        Number(
+            job?.skill_match_percentage
+        ) || 0;
+
+    const preferredSkillMatch =
+        Number(
+            job?.preferred_skill_match_percentage
+        ) || 0;
+
+    const preferenceMatch =
+        Number(
+            job?.preference_match_percentage
+        ) || 0;
+
+    const studentScore =
+        job?.student_score !== null &&
+            job?.student_score !== undefined
+            ? Number(job.student_score)
+            : null;
+
+    const matchedSkills =
+        Array.isArray(
+            job?.matched_skills
+        )
+            ? job.matched_skills
+            : [];
+
+    const missingSkills =
+        Array.isArray(
+            job?.missing_skills
+        )
+            ? job.missing_skills
+            : [];
+
+    const preferredMissingSkills =
+        Array.isArray(
+            job?.preferred_missing_skills
+        )
+            ? job.preferred_missing_skills
+            : [];
+
+    const locations =
+        Array.isArray(job?.location)
+            ? job.location.join(", ")
+            : job?.location ||
+            "Location not specified";
+
+    return (
+        <div
+            style={{
+                background: "white",
+                borderRadius: "16px",
+                padding: "22px",
+                border:
+                    "1px solid #e5e7eb",
+                boxShadow:
+                    "0 5px 18px rgba(31,41,55,0.06)",
+            }}
+        >
+
+            {/* JOB HEADER */}
+
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent:
+                        "space-between",
+                    alignItems:
+                        "flex-start",
+                    gap: "20px",
+                    flexWrap:
+                        "wrap",
+                }}
+            >
+                <div>
+                    <div
+                        style={{
+                            display:
+                                "inline-block",
+                            padding:
+                                "5px 10px",
+                            borderRadius:
+                                "20px",
+                            background:
+                                "#eef2ff",
+                            color:
+                                "#4338ca",
+                            fontSize:
+                                "12px",
+                            fontWeight:
+                                "700",
+                            marginBottom:
+                                "8px",
+                        }}
+                    >
+                        #{index + 1} Recommended
+                    </div>
+
+                    <h2
+                        style={{
+                            margin:
+                                "5px 0",
+                            color:
+                                "#111827",
+                            fontSize:
+                                "21px",
+                        }}
+                    >
+                        {job?.job_role ||
+                            "Job Role"}
+                    </h2>
+
+                    <h3
+                        style={{
+                            margin:
+                                "5px 0 10px",
+                            color:
+                                "#4f46e5",
+                            fontSize:
+                                "16px",
+                        }}
+                    >
+                        {job?.company_name ||
+                            "Company"}
+                    </h3>
+
+                    <p
+                        style={{
+                            margin:
+                                "5px 0",
+                            color:
+                                "#6b7280",
+                        }}
+                    >
+                        📍 {locations}
+                    </p>
+
+                    {job?.employment_type && (
+                        <p
+                            style={{
+                                margin:
+                                    "5px 0",
+                                color:
+                                    "#6b7280",
+                            }}
+                        >
+                            💼{" "}
+                            {job.employment_type}
+                        </p>
+                    )}
+
+                    {job?.experience_required && (
+                        <p
+                            style={{
+                                margin:
+                                    "5px 0",
+                                color:
+                                    "#6b7280",
+                            }}
+                        >
+                            🧑‍💻 Experience:{" "}
+                            {
+                                job.experience_required
+                            }
+                        </p>
+                    )}
+                </div>
+
+                {/* FINAL SCORE */}
+
+                <div
+                    style={{
+                        minWidth:
+                            "120px",
+                        padding:
+                            "15px",
+                        borderRadius:
+                            "14px",
+                        background:
+                            "#eef2ff",
+                        textAlign:
+                            "center",
+                    }}
+                >
+                    <p
+                        style={{
+                            margin:
+                                "0 0 5px",
+                            fontSize:
+                                "12px",
+                            color:
+                                "#6b7280",
+                            fontWeight:
+                                "700",
+                        }}
+                    >
+                        MATCH SCORE
+                    </p>
+
+                    <div
+                        style={{
+                            fontSize:
+                                "30px",
+                            fontWeight:
+                                "800",
+                            color:
+                                "#4f46e5",
+                        }}
+                    >
+                        {finalScore}%
+                    </div>
+                </div>
+            </div>
+
+            {/* JOB DESCRIPTION */}
+
+            {job?.job_description && (
+                <p
+                    style={{
+                        marginTop:
+                            "18px",
+                        lineHeight:
+                            "1.6",
+                        color:
+                            "#4b5563",
+                    }}
+                >
+                    {job.job_description}
+                </p>
+            )}
+
+            {/* MATCH BREAKDOWN */}
+
+            <div
+                style={{
+                    display:
+                        "grid",
+                    gridTemplateColumns:
+                        "repeat(auto-fit,minmax(150px,1fr))",
+                    gap:
+                        "12px",
+                    marginTop:
+                        "20px",
+                }}
+            >
+                <ScoreBox
+                    title="Required Skills"
+                    value={
+                        skillMatch
+                    }
+                />
+
+                <ScoreBox
+                    title="Preferred Skills"
+                    value={
+                        preferredSkillMatch
+                    }
+                />
+
+                <ScoreBox
+                    title="Career Preference"
+                    value={
+                        preferenceMatch
+                    }
+                />
+
+                {studentScore !== null && (
+                    <ScoreBox
+                        title="Student Score"
+                        value={
+                            studentScore
+                        }
+                        suffix="/10"
+                    />
+                )}
+            </div>
+
+            {/* MATCHED SKILLS */}
+
+            <SkillList
+                title="✅ Matched Skills"
+                skills={
+                    matchedSkills
+                }
+                emptyText="No required skills matched yet."
+                background="#f0fdf4"
+                border="#bbf7d0"
+                textColor="#166534"
+            />
+
+            {/* MISSING SKILLS */}
+
+            <SkillList
+                title="📚 Missing Required Skills"
+                skills={
+                    missingSkills
+                }
+                emptyText="You have all required skills."
+                background="#fef2f2"
+                border="#fecaca"
+                textColor="#991b1b"
+            />
+
+            {/* PREFERRED MISSING SKILLS */}
+
+            {preferredMissingSkills.length >
+                0 && (
+                    <SkillList
+                        title="⭐ Missing Preferred Skills"
+                        skills={
+                            preferredMissingSkills
+                        }
+                        emptyText=""
+                        background="#fffbeb"
+                        border="#fde68a"
+                        textColor="#92400e"
+                    />
+                )}
+
+            {/* ELIGIBILITY */}
+
+            <div
+                style={{
+                    marginTop:
+                        "18px",
+                    padding:
+                        "14px",
+                    borderRadius:
+                        "10px",
+                    background:
+                        "#f0fdf4",
+                    border:
+                        "1px solid #bbf7d0",
+                }}
+            >
+                <strong
+                    style={{
+                        color:
+                            "#166534",
+                    }}
+                >
+                    ✅ Eligibility:
+                </strong>
+
+                <span
+                    style={{
+                        marginLeft:
+                            "8px",
+                        color:
+                            "#166534",
+                    }}
+                >
+                    You meet the eligibility
+                    requirements for this job.
+                </span>
+            </div>
+
+            {/* SCORE REQUIREMENT */}
+
+            {job?.minimum_score !== null &&
+                job?.minimum_score !==
+                undefined && (
+                    <div
+                        style={{
+                            marginTop:
+                                "12px",
+                            padding:
+                                "12px 14px",
+                            borderRadius:
+                                "10px",
+                            background:
+                                "#f8fafc",
+                            border:
+                                "1px solid #e5e7eb",
+                            fontSize:
+                                "13px",
+                            color:
+                                "#4b5563",
+                        }}
+                    >
+                        🎯 Minimum required
+                        student score:{" "}
+                        <strong>
+                            {
+                                job.minimum_score
+                            }
+                        </strong>
+                        /10
+                    </div>
+                )}
+
+            {/* LEARNING RECOMMENDATIONS */}
+
+            {Array.isArray(
+                job?.learning_recommendations
+            ) &&
+                job.learning_recommendations
+                    .length > 0 && (
+                    <div
+                        style={{
+                            marginTop:
+                                "18px",
+                            padding:
+                                "18px",
+                            borderRadius:
+                                "12px",
+                            background:
+                                "#f5f3ff",
+                            border:
+                                "1px solid #ddd6fe",
+                        }}
+                    >
+                        <h4
+                            style={{
+                                marginTop: 0,
+                                color:
+                                    "#4338ca",
+                            }}
+                        >
+                            🎓 Recommended Learning
+                        </h4>
+
+                        {job.learning_recommendations.map(
+                            (
+                                item,
+                                itemIndex
+                            ) => (
+                                <div
+                                    key={
+                                        itemIndex
+                                    }
+                                    style={{
+                                        padding:
+                                            "9px 0",
+                                        borderBottom:
+                                            itemIndex <
+                                                job
+                                                    .learning_recommendations
+                                                    .length -
+                                                1
+                                                ? "1px solid #e5e7eb"
+                                                : "none",
+                                    }}
+                                >
+                                    <strong>
+                                        {item.skill}
+                                    </strong>
+
+                                    <span
+                                        style={{
+                                            marginLeft:
+                                                "8px",
+                                            fontSize:
+                                                "12px",
+                                            padding:
+                                                "4px 8px",
+                                            borderRadius:
+                                                "12px",
+                                            background:
+                                                item.priority ===
+                                                    "high"
+                                                    ? "#fee2e2"
+                                                    : "#fef3c7",
+                                            color:
+                                                item.priority ===
+                                                    "high"
+                                                    ? "#991b1b"
+                                                    : "#92400e",
+                                        }}
+                                    >
+                                        {
+                                            item.priority
+                                        }
+                                    </span>
+
+                                    <p
+                                        style={{
+                                            margin:
+                                                "5px 0 0",
+                                            fontSize:
+                                                "13px",
+                                            color:
+                                                "#6b7280",
+                                        }}
+                                    >
+                                        {
+                                            item.reason
+                                        }
+                                    </p>
+                                </div>
+                            )
+                        )}
+                    </div>
+                )}
+
+            {/* APPLY BUTTON */}
+
+            {job?.application_url && (
+                <div
+                    style={{
+                        marginTop:
+                            "20px",
+                    }}
+                >
+                    <a
+                        href={
+                            job.application_url
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                            display:
+                                "inline-block",
+                            textDecoration:
+                                "none",
+                            background:
+                                "#4f46e5",
+                            color:
+                                "white",
+                            padding:
+                                "11px 20px",
+                            borderRadius:
+                                "9px",
+                            fontWeight:
+                                "700",
+                        }}
+                    >
+                        🚀 View / Apply
+                    </a>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// =============================================================
+// SCORE BOX
+// =============================================================
+
+function ScoreBox({
+    title,
+    value,
+    suffix = "%",
+}) {
+    const numericValue =
+        Number(value);
+
+    return (
+        <div
+            style={{
+                padding:
+                    "14px",
+                background:
+                    "#f8fafc",
+                borderRadius:
+                    "10px",
+                border:
+                    "1px solid #e5e7eb",
+            }}
+        >
+            <p
+                style={{
+                    margin:
+                        "0 0 5px",
+                    color:
+                        "#6b7280",
+                    fontSize:
+                        "12px",
+                }}
+            >
+                {title}
+            </p>
+
+            <strong
+                style={{
+                    color:
+                        "#111827",
+                    fontSize:
+                        "20px",
+                }}
+            >
+                {Number.isFinite(numericValue)
+                    ? numericValue.toFixed(1)
+                    : "0.0"}
+                {suffix}
+            </strong>
+        </div>
+    );
+}
+
+// =============================================================
+// SKILL LIST
+// =============================================================
+
+function SkillList({
+    title,
+    skills,
+    emptyText,
+    background,
+    border,
+    textColor,
+}) {
+    return (
+        <div
+            style={{
+                marginTop:
+                    "18px",
+                padding:
+                    "18px",
+                borderRadius:
+                    "12px",
+                background,
+                border:
+                    `1px solid ${border}`,
+            }}
+        >
+            <h4
+                style={{
+                    marginTop: 0,
+                    color: textColor,
+                }}
+            >
+                {title}
+            </h4>
+
+            {skills.length === 0 ? (
+                <p
+                    style={{
+                        marginBottom: 0,
+                        color: "#6b7280",
+                    }}
+                >
+                    {emptyText}
+                </p>
+            ) : (
+                <div
+                    style={{
+                        display:
+                            "flex",
+                        flexWrap:
+                            "wrap",
+                        gap:
+                            "8px",
+                    }}
+                >
+                    {skills.map(
+                        (
+                            skill,
+                            index
+                        ) => (
+                            <span
+                                key={
+                                    index
+                                }
+                                style={{
+                                    padding:
+                                        "7px 11px",
+                                    borderRadius:
+                                        "20px",
+                                    background:
+                                        "white",
+                                    color:
+                                        textColor,
+                                    border:
+                                        `1px solid ${border}`,
+                                    fontSize:
+                                        "13px",
+                                    fontWeight:
+                                        "600",
+                                }}
+                            >
+                                {typeof skill ===
+                                    "string"
+                                    ? skill
+                                    : skill?.name ||
+                                    "Skill"}
+                            </span>
+                        )
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// =============================================================
+// LEARNING SUMMARY
+// =============================================================
+
+function LearningSummary({
+    recommendations,
+}) {
+    const skillMap =
+        new Map();
+
+    recommendations.forEach(
+        (job) => {
+            const required =
+                Array.isArray(
+                    job?.missing_skills
+                )
+                    ? job.missing_skills
+                    : [];
+
+            const preferred =
+                Array.isArray(
+                    job?.preferred_missing_skills
+                )
+                    ? job.preferred_missing_skills
+                    : [];
+
+            required.forEach(
+                (skill) => {
+                    if (
+                        !skillMap.has(
+                            skill
+                        )
+                    ) {
+                        skillMap.set(
+                            skill,
+                            "high"
+                        );
+                    }
+                }
+            );
+
+            preferred.forEach(
+                (skill) => {
+                    if (
+                        !skillMap.has(
+                            skill
+                        )
+                    ) {
+                        skillMap.set(
+                            skill,
+                            "medium"
+                        );
+                    }
+                }
+            );
+        }
+    );
+
+    const missingSkills =
+        Array.from(
+            skillMap.entries()
+        );
+
+    if (
+        missingSkills.length ===
+        0
+    ) {
+        return (
+            <p
+                style={{
+                    lineHeight: 1.6,
+                    color:
+                        "#166534",
+                }}
+            >
+                🎉 Great! You currently
+                have all the important
+                skills required by your
+                recommended jobs.
+            </p>
+        );
+    }
+
+    return (
+        <div>
+            <p
+                style={{
+                    lineHeight: 1.6,
+                }}
+            >
+                Based on your recommended
+                jobs, these are the skills
+                you should consider learning:
+            </p>
+
+            <div
+                style={{
+                    display:
+                        "flex",
+                    flexWrap:
+                        "wrap",
+                    gap:
+                        "10px",
+                }}
+            >
+                {missingSkills.map(
+                    (
+                        [skill, priority],
+                        index
+                    ) => (
+                        <span
+                            key={
+                                index
+                            }
+                            style={{
+                                padding:
+                                    "8px 13px",
+                                borderRadius:
+                                    "20px",
+                                background:
+                                    priority ===
+                                        "high"
+                                        ? "#fee2e2"
+                                        : "#fef3c7",
+                                color:
+                                    priority ===
+                                        "high"
+                                        ? "#991b1b"
+                                        : "#92400e",
+                                fontWeight:
+                                    "700",
+                                fontSize:
+                                    "13px",
+                            }}
+                        >
+                            {skill}
+                            {" · "}
+                            {priority}
+                        </span>
+                    )
+                )}
+            </div>
         </div>
     );
 }
@@ -1284,6 +2907,26 @@ function InfoRow({
     label,
     value,
 }) {
+    let displayValue =
+        value;
+
+    if (
+        Array.isArray(value)
+    ) {
+        displayValue =
+            value.join(", ");
+    }
+
+    if (
+        typeof value ===
+        "object" &&
+        value !== null &&
+        !Array.isArray(value)
+    ) {
+        displayValue =
+            JSON.stringify(value);
+    }
+
     return (
         <div
             style={{
@@ -1323,7 +2966,7 @@ function InfoRow({
                         "break-word",
                 }}
             >
-                {value ||
+                {displayValue ||
                     "Not provided"}
             </span>
         </div>
