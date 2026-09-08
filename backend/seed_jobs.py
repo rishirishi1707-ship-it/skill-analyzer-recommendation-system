@@ -496,7 +496,7 @@ jobs = [
             "Data Visualization"
         ],
 
-        "minimum_score": 6.0,
+        "minimum_score": 5.0,
 
         "eligibility": {
             "degrees": [
